@@ -1,0 +1,47 @@
+# Version catalog for the ps-widget-repo plugin build.
+# Versions are EXACTLY the PocketShell app's (see pocketshell/gradle/libs.versions.toml)
+# so plugin artifacts stay binary-compatible with the host's runtime classpath.
+
+[versions]
+# Build toolchain — verified stable releases (PocketShell docs/RESEARCH.md §7, M0 2026-08-30)
+agp = "8.13.2"
+# 2.4.20 lacks Maven Central/Portal plugin markers at M0 time — pinned to latest markered release
+kotlin = "2.4.10"
+
+# AndroidX — pinned to the compileSdk-36 / AGP-8.x generation
+activityCompose = "1.11.0"
+lifecycle = "2.9.4"
+datastore = "1.2.1"
+
+# Compose — 2025.12.01 (Compose 1.9.x) is the verified pairing for compileSdk 36 + AGP 8.13.2
+composeBom = "2025.12.01"
+materialIconsExtended = "1.7.8"
+
+# Kotlinx
+kotlinxSerialization = "1.9.0"
+kotlinxCoroutines = "1.10.2"
+
+# Testing
+junit = "4.13.2"
+
+[libraries]
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+
+compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+compose-ui = { group = "androidx.compose.ui", name = "ui" }
+compose-material3 = { group = "androidx.compose.material3", name = "material3" }
+compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "materialIconsExtended" }
+
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-coroutines = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

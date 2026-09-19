@@ -66,7 +66,7 @@
       "plugin": {
         "className": "repo.hello.HelloPlugin",
         "dex": "releases/hello/1.0.0/plugin.jar",
-        "sha256": "fc97b6b29d9909aa8706b2b8cac64c2a03b7d64478dfecc1d39e10db89096664"
+        "sha256": "4003ca4c6c7a98772862b2de17671fcd52cc699edbba1c31dead9ae22352479c"
       }
     }
   ]

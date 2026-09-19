@@ -1,0 +1,36 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  catalog:
+    name: Catalog validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate catalog.json
+        run: python3 tools/validate-catalog.py
+
+  build:
+    name: Plugin build (Gradle, Java 17)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      # ubuntu-latest runners ship the Android SDK (ANDROID_HOME is preset,
+      # android-36 + build-tools resolve through the Gradle plugin's SDK
+      # auto-install); no local.properties in CI.
+      - name: Assemble + unit-test all plugins
+        run: |
+          ./gradlew --no-daemon \
+            :plugins:hello:assembleDebug \
+            :plugins:git:assembleDebug \
+            :plugins:sync:assembleDebug \
+            :plugins:git:testDebugUnitTest \
+            :plugins:sync:testDebugUnitTest
