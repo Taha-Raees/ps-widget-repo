@@ -32,12 +32,12 @@ kotlin {
     }
 }
 
-// The HOST API jar is checked into this repo (api/pocketshell-0.14.0-api.jar,
+// The HOST API jar is checked into this repo (api/pocketshell-api.jar,
 // see api/PROVENANCE.md) so the build is standalone — no PocketShell checkout
 // needed. At runtime the host provides these classes through parent
 // classloader delegation.
 dependencies {
-    compileOnly(files(rootProject.file("api/pocketshell-0.14.0-api.jar")))
+    compileOnly(files(rootProject.file("api/pocketshell-api.jar")))
     compileOnly(platform(libs.compose.bom))
     compileOnly("org.jetbrains:annotations:23.0.0")
     runtimeOnly("org.jetbrains:annotations:23.0.0")
@@ -63,7 +63,7 @@ dependencies {
     testImplementation("androidx.compose.runtime:runtime")
     // The probe tests use the HOST's ExecResult (this module's own sync
     // classes come from its main source set, not the jar).
-    testImplementation(files(rootProject.file("api/pocketshell-0.14.0-api.jar")))
+    testImplementation(files(rootProject.file("api/pocketshell-api.jar")))
     // The codec tests (SyncStoreCodec via SyncProfileTest) run the real
     // serialization machinery on the JVM.
     testImplementation(libs.kotlinx.serialization.json)

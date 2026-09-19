@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 // M8.5 — the PILOT WIDGET PLUGIN ("hello"): real compiled code that the
 // app downloads (plugin.dex), verifies (sha256 from the catalog) and
 // loads with DexClassLoader. It compiles against the HOST's classes
-// (api/pocketshell-0.14.0-api.jar, checked into this repo — see
+// (api/pocketshell-api.jar, checked into this repo — see
 // api/PROVENANCE.md) plus the SAME Compose stack — the host provides those
 // classes at runtime through parent classloader delegation, so the plugin
 // dex carries only this widget's own classes. This is the minimal plugin
@@ -36,7 +36,7 @@ kotlin {
 // The host's compiled classes: the plugin compiles against them and, at
 // runtime, resolves them through parent classloader delegation.
 dependencies {
-    compileOnly(files(rootProject.file("api/pocketshell-0.14.0-api.jar")))
+    compileOnly(files(rootProject.file("api/pocketshell-api.jar")))
     compileOnly(platform(libs.compose.bom))
     compileOnly(libs.compose.ui) // api-brings runtime
     compileOnly(libs.compose.material3)
