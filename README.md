@@ -32,7 +32,7 @@ Compiled plugins are the deliberate exception, and they are gated twice:
 catalog.json                 the index the app fetches (HTTPS only)
 widgets/*.json               data-manifest widgets (probe + card template)
 plugins/git|sync|hello/      CANONICAL SOURCES of the compiled plugins
-api/pocketshell-0.14.0-api.jar  host API jar the plugins compile against
+api/pocketshell-api.jar     host API jar the plugins compile against
 api/PROVENANCE.md            where that jar came from + refresh procedure
 releases/<id>/<version>/plugin.jar   published artifacts (classes.dex inside)
 tools/build-plugin.sh        build + dex + publish one plugin
@@ -48,7 +48,7 @@ tools/validate-catalog.py    validate catalog.json (CI gate)
 | `hello` | `repo.hello.HelloPlugin` | 1.0.0 | `plugins/hello/` (minimal shape — start new plugins here) |
 
 Each module has its own README. The plugins compile against the checked-in
-host API jar (`api/pocketshell-0.14.0-api.jar`, provenance + refresh
+host API jar (`api/pocketshell-api.jar`, provenance + refresh
 procedure in `api/PROVENANCE.md`) and the same Compose stack the host ships
 — none of that is dexed into the artifacts.
 
@@ -128,8 +128,91 @@ unit tests on every push/PR.
 - **`d8 not found` / `android.jar not found`** — build-plugin.sh expects
   `$SDK_DIR/build-tools/36.1.0/` and `$SDK_DIR/platforms/android-36/`;
   install via the SDK manager or fix `local.properties`.
-- **`api/pocketshell-0.14.0-api.jar` out of date after host API changes** —
+- **`api/pocketshell-api.jar` out of date after host API changes** —
   refresh per `api/PROVENANCE.md` (clean `:app:pluginClassesJar` in a
   PocketShell checkout, copy in, update provenance). Stale plugin classes
   in that jar would be harmless for compilation (each module's own sources
   shadow the jar), but refresh clean anyway.
+
+## Versions & updates
+
+Plugin versions are INDEPENDENT of the PocketShell app version:
+
+- PocketShell app: `0.14.0-m8.5` (the host)
+- Git plugin: `2.0.0` · Sync plugin: `2.0.0` · Hello plugin: `1.0.0`
+
+PocketShell compares the catalog entry's `version` against the installed
+plugin's version (semver, compared major→minor→patch). A newer catalog
+version makes the Widget catalog row show **Update**; tapping it
+re-downloads the artifact, re-verifies the SHA-256 and replaces the
+installed record. Same-version entries show **Installed** — there is no
+downgrade path in the UI (remove the widget, then install an explicitly
+older release if ever needed).
+
+What a version bump means (policy):
+
+- **patch** — fixes inside the widget, no behavior surface change.
+- **minor** — new widget functionality or template fields.
+- **major** — behavior or compatibility change; check `minAppVersion`.
+
+`minAppVersion` gates installation: a plugin whose minimum app version is
+newer than the running PocketShell is refused with the reason shown in
+the Control Center. The plugin API itself (`WidgetPlugin`, the
+`HomeApplication` contract, theme tokens) evolves only with app releases
+— that stability is what lets plugins update independently.
+
+## Debugging an install failure
+
+Install/update failures surface as a status line in the Widget catalog
+section of Control Center (Settings → Home applications). The reasons are
+the loader's/downloader's real causes — work through them in order:
+
+- `HTTP <code>` — the catalog or artifact URL failed; check the file
+  exists in the repo at the catalog's `plugin.dex` path.
+- `sha256 mismatch (got … expected …)` — the artifact bytes differ from
+  the catalog pin; re-run `tools/build-plugin.sh <id> <version>
+  --update-catalog` to re-pin, or the repo was updated inconsistently.
+- `refusing … plugin record` — the record failed shape validation
+  (bad id/className/dex path); fix the catalog entry.
+- `minAppVersion` refusal — the plugin needs a newer app; update
+  PocketShell first.
+
+Installed records and artifact files live in the app's private storage
+(`files/plugins/`); "Remove" deletes both. If a row still renders after
+removal, it is the carousel configuration (Control Center → On Home → ✕),
+not the plugin.
+
+## Licenses
+
+- PocketShell is **GPL-3.0-only**; plugins compile against PocketShell
+  host classes and are therefore linked works — **this repo's plugin
+  sources are GPL-3.0-compatible** (GPL-3.0-or-later for your own
+  widgets).
+- The data manifests and card templates are configuration for PocketShell's
+  renderer; attribute what you reuse and do not import third-party code
+  without checking its license.
+- The vendored terminal modules in PocketShell remain GPLv3 (pinned
+  upstream — see PocketShell `docs/THIRD_PARTY.md`).
+
+## Developing your first widget
+
+The fastest path is copying `plugins/hello/` — it is the minimal working
+shape (one manifest-free plugin module: `WidgetPlugin` implementation +
+one Compose card):
+
+1. `cp -r plugins/hello plugins/mywidget` and rename the package/class.
+2. Set `pluginId`, `pluginVersion` and implement `create(context)` to
+   return your `HomeApplication` (a themed Compose card; use the host's
+   `HomeTokens`/`TerminalTheme` so the widget follows the user's theme).
+3. Build + test: `./gradlew :plugins:mywidget:assembleDebug
+   :plugins:mywidget:testDebugUnitTest`.
+4. Publish + pin: `tools/build-plugin.sh mywidget 1.0.0
+   --update-catalog`.
+5. Install: PocketShell → Control Center → Widget catalog → Fetch → the
+   row appears → Install → add it to Home from Available.
+6. Iterate: change the source, bump `version` (even a rebuild of the same
+   version needs a version bump to re-download — the catalog pins bytes),
+   publish, tap Update.
+
+Anything the compiled card can do, a plugin can do — the Git and Sync
+plugins are the full-capability reference implementations.
