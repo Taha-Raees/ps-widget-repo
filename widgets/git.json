@@ -1,0 +1,16 @@
+{
+  "id": "git",
+  "name": "Git",
+  "version": "1.0.0",
+  "summary": "Repositories in the Linux guest — branch, dirty state, ahead/behind",
+  "author": "PocketShell core",
+  "minAppVersion": "0.13.0",
+  "capabilities": ["guest.ready"],
+  "probe": { "kind": "git.overview" },
+  "card": {
+    "headline": "Git",
+    "emptyLine": "No repositories",
+    "itemTemplate": "{name} · {branch} · {dirty}",
+    "maxLines": 6
+  }
+}

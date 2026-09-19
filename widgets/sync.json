@@ -1,0 +1,16 @@
+{
+  "id": "sync",
+  "name": "Sync",
+  "version": "1.0.0",
+  "summary": "Backup profiles — source, destination, backend, last run outcome",
+  "author": "PocketShell core",
+  "minAppVersion": "0.13.0",
+  "capabilities": ["guest.ready"],
+  "probe": { "kind": "sync.overview" },
+  "card": {
+    "headline": "Sync",
+    "emptyLine": "No profiles yet",
+    "itemTemplate": "{source} → {destination} · {status}",
+    "maxLines": 6
+  }
+}

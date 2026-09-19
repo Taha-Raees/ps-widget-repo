@@ -26,6 +26,24 @@
       "version": "1.0.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/storage.json"
+    },
+    {
+      "id": "git",
+      "name": "Git",
+      "summary": "Repositories in the Linux guest — branch, dirty state, ahead/behind",
+      "author": "PocketShell core",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "widgets/git.json"
+    },
+    {
+      "id": "sync",
+      "name": "Sync",
+      "summary": "Backup profiles — source, destination, backend, last run outcome",
+      "author": "PocketShell core",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "widgets/sync.json"
     }
   ]
 }
