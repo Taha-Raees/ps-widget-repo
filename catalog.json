@@ -32,18 +32,28 @@
       "name": "Git",
       "summary": "Repositories in the Linux guest — branch, dirty state, ahead/behind",
       "author": "PocketShell core",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "minAppVersion": "0.13.0",
-      "file": "widgets/git.json"
+      "file": "widgets/git.json",
+      "plugin": {
+        "className": "app.pocketshell.widget.git.GitPlugin",
+        "dex": "releases/git/2.0.0/plugin.jar",
+        "sha256": "24cedb6f9fe03d5292adaeccd3bbc32d768beabe0d55bb728c62241946f8c227"
+      }
     },
     {
       "id": "sync",
       "name": "Sync",
       "summary": "Backup profiles — source, destination, backend, last run outcome",
       "author": "PocketShell core",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "minAppVersion": "0.13.0",
-      "file": "widgets/sync.json"
+      "file": "widgets/sync.json",
+      "plugin": {
+        "className": "app.pocketshell.widget.sync.SyncPlugin",
+        "dex": "releases/sync/2.0.0/plugin.jar",
+        "sha256": "27414ba57454f98bff90f5a7a1d1a2ea50d5b432b2109dce05767c4170306c06"
+      }
     },
     {
       "id": "hello",
