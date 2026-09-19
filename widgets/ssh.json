@@ -1,0 +1,16 @@
+{
+  "id": "ssh",
+  "name": "SSH",
+  "version": "1.0.0",
+  "summary": "Saved SSH hosts in the Linux guest's ~/.ssh/config and live ssh client processes",
+  "author": "PocketShell",
+  "minAppVersion": "0.13.0",
+  "capabilities": ["ssh.guest"],
+  "probe": { "kind": "ssh.guest", "params": {} },
+  "card": {
+    "headline": "SSH",
+    "emptyLine": "No ssh configuration found — run ssh in a Linux terminal",
+    "itemTemplate": "{target}",
+    "maxLines": 8
+  }
+}

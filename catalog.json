@@ -1,0 +1,22 @@
+{
+  "widgets": [
+    {
+      "id": "servers",
+      "name": "Servers",
+      "summary": "Dev servers in the Linux guest — verified live endpoints",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "widgets/servers.json"
+    },
+    {
+      "id": "ssh",
+      "name": "SSH",
+      "summary": "Saved SSH hosts in the Linux guest's ~/.ssh/config and live ssh client processes",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "widgets/ssh.json"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "servers",
+  "name": "Servers",
+  "version": "1.0.0",
+  "summary": "Dev servers in the Linux guest — verified live endpoints",
+  "author": "PocketShell",
+  "minAppVersion": "0.13.0",
+  "capabilities": ["proc.net.listen"],
+  "probe": { "kind": "proc.net.listen", "params": {} },
+  "card": {
+    "headline": "Servers",
+    "emptyLine": "Nothing listening — start a server in a terminal",
+    "itemTemplate": ":{port}  {process}",
+    "maxLines": 8
+  }
+}
