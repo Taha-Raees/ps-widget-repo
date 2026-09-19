@@ -44,6 +44,20 @@
       "version": "1.0.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/sync.json"
+    },
+    {
+      "id": "hello",
+      "name": "Hello",
+      "summary": "The first plugin widget — built from ps-widget-repo",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "releases/hello/1.0.0/catalog-entry-unused.json",
+      "plugin": {
+        "className": "repo.hello.HelloPlugin",
+        "dex": "releases/hello/1.0.0/plugin.jar",
+        "sha256": "fc97b6b29d9909aa8706b2b8cac64c2a03b7d64478dfecc1d39e10db89096664"
+      }
     }
   ]
 }
