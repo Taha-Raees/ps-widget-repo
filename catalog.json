@@ -17,6 +17,15 @@
       "version": "1.0.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/ssh.json"
+    },
+    {
+      "id": "storage",
+      "name": "Storage",
+      "summary": "Where your space goes — and what eats it",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "widgets/storage.json"
     }
   ]
 }

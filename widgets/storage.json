@@ -1,0 +1,16 @@
+{
+  "id": "storage",
+  "name": "Storage",
+  "version": "1.0.0",
+  "summary": "Where your space goes — and what eats it",
+  "author": "PocketShell",
+  "minAppVersion": "0.13.0",
+  "capabilities": ["storage.rootfs"],
+  "probe": { "kind": "storage.rootfs", "params": {} },
+  "card": {
+    "headline": "Storage",
+    "emptyLine": "Empty",
+    "itemTemplate": "{name}  {size}",
+    "maxLines": 6
+  }
+}
