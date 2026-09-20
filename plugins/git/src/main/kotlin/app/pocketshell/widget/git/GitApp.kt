@@ -388,10 +388,13 @@ internal class GitState(val probe: GitProbe, val ops: GitOps) {
     var stashUi by mutableStateOf<StashUi>(StashUi.Idle)
     var stashServed by mutableStateOf<GitScreen.Stash?>(null)
 
-    // The operation engine: one queued op at a time.
+    // The operation engine: one queued op at a time. The serial makes
+    // every request distinct — the identical op queued twice must still
+    // re-run (an unchanged LaunchedEffect key would silently drop it).
     var opReq by mutableStateOf<OpReq?>(null)
     var opRunning by mutableStateOf<String?>(null)
     var opResult by mutableStateOf<GitOps.OpResult?>(null)
+    private var opSerial = 0
 
     fun push(screen: GitScreen) {
         stack = stack + screen
@@ -423,7 +426,7 @@ internal class GitState(val probe: GitProbe, val ops: GitOps) {
     fun queueOp(kind: OpKind, repoPath: String, arg: String?) {
         if (opRunning != null) return
         opResult = null
-        opReq = OpReq(kind, repoPath, arg, serial = 0)
+        opReq = OpReq(kind, repoPath, arg, serial = ++opSerial)
     }
 
     /**

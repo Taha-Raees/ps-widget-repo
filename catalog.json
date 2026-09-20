@@ -38,7 +38,7 @@
       "plugin": {
         "className": "app.pocketshell.widget.git.GitPlugin",
         "dex": "releases/git/3.0.0/plugin.jar",
-        "sha256": "040ba497c29199a3b1ffa5e97527c62a559cf730f72c77c1aa672b3afa84893d"
+        "sha256": "7f816622b171b83b5aa3ed3ad129e0ffbedfb1585e6cce98db7df908bc2d8d59"
       }
     },
     {
