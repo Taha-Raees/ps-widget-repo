@@ -43,7 +43,7 @@ tools/validate-catalog.py    validate catalog.json (CI gate)
 
 | id | entry class | version | sources |
 |----|-------------|---------|---------|
-| `git` | `app.pocketshell.widget.git.GitPlugin` | 2.0.0 | `plugins/git/` |
+| `git` | `app.pocketshell.widget.git.GitPlugin` | 3.0.0 | `plugins/git/` |
 | `sync` | `app.pocketshell.widget.sync.SyncPlugin` | 2.0.0 | `plugins/sync/` |
 | `hello` | `repo.hello.HelloPlugin` | 1.0.0 | `plugins/hello/` (minimal shape — start new plugins here) |
 
@@ -139,7 +139,7 @@ unit tests on every push/PR.
 Plugin versions are INDEPENDENT of the PocketShell app version:
 
 - PocketShell app: `0.14.0-m8.5` (the host)
-- Git plugin: `2.0.0` · Sync plugin: `2.0.0` · Hello plugin: `1.0.0`
+- Git plugin: `3.0.0` · Sync plugin: `2.0.0` · Hello plugin: `1.0.0`
 
 PocketShell compares the catalog entry's `version` against the installed
 plugin's version (semver, compared major→minor→patch). A newer catalog
