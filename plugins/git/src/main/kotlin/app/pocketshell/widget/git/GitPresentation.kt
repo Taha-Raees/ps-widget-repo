@@ -77,9 +77,6 @@ internal object GitPresentation {
 
     // ------------------------------------------- bounded inspection pages
 
-    /** The commit page's stat list renders at most this many lines. */
-    const val COMMIT_STAT_MAX_LINES = 40
-
     /** The diff page renders at most this many lines. */
     const val DIFF_MAX_LINES = 400
 
@@ -127,5 +124,31 @@ internal object GitPresentation {
         if (s.startsWith("git@")) s = s.removePrefix("git@").replaceFirst(":", "/")
         if (s.endsWith(".git")) s = s.removeSuffix(".git")
         return s
+    }
+
+    // ----------------------------------------------------- the diff renderer
+
+    /** What one raw diff line IS — the color/weight a diff row gets. */
+    enum class DiffLineKind { ADD, DEL, HUNK, META, CONTEXT }
+
+    /**
+     * Classify one raw unified-diff line. The header words are git's own
+     * vocabulary (diff --git / index / --- +++ / mode & rename lines /
+     * "Binary files … differ"); "---"/"+++" are headers ONLY with their
+     * trailing space+path — a deleted line whose content begins "--" is a
+     * DEL, not a header. Anything unrecognized is CONTEXT: an honest
+     * default, never a made-up classification.
+     */
+    fun diffLineKind(line: String): DiffLineKind = when {
+        line.startsWith("@@") -> DiffLineKind.HUNK
+        line.startsWith("diff --git") || line.startsWith("index ") -> DiffLineKind.META
+        line.startsWith("old mode") || line.startsWith("new mode") -> DiffLineKind.META
+        line.startsWith("new file") || line.startsWith("deleted file") -> DiffLineKind.META
+        line.startsWith("similarity index") || line.startsWith("rename ") ||
+            line.startsWith("copy ") || line.startsWith("Binary files") -> DiffLineKind.META
+        line.startsWith("--- ") || line.startsWith("+++ ") -> DiffLineKind.META
+        line.startsWith("+") -> DiffLineKind.ADD
+        line.startsWith("-") -> DiffLineKind.DEL
+        else -> DiffLineKind.CONTEXT
     }
 }

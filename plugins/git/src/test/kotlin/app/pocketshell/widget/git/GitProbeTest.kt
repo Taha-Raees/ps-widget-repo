@@ -340,24 +340,29 @@ class GitProbeTest {
     private val showOutput = """
         a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
         Alice Author <alice@example.com>
+        Thu Sep 18 12:00:00 2026 +0500
         2 days ago
         Add the thing
 
-         src/Main.kt | 4 ++--
-         src/Other.kt | 2 +-
-         2 files changed, 3 insertions(+), 3 deletions(-)
+        The body paragraph.
+
+        @@NUMSTAT@@
+
+        4${'\t'}2${'\t'}src/Main.kt
+        1${'\t'}1${'\t'}src/Other.kt
+        -${'\t'}-${'\t'}logo.png
     """.trimIndent() + "\n"
 
     @Test
-    fun `showCommit execs the pinned read-only argv and parses the header block`() {
+    fun `showCommit execs the pinned read-only argv and parses the numstat block`() {
         val fake = FakeExec { ExecResult(exitCode = 0, stdout = showOutput, stderr = "") }
         val result = GitProbe(fake).showCommit("/root/project", "a1b2c3d")
         val detail = (result as CommitResult.Done).detail
         assertEquals(
             listOf(
                 "git", "-C", "/root/project",
-                "show", "--stat",
-                "--pretty=format:%H%n%an <%ae>%n%ar%n%s",
+                "show", "--numstat",
+                "--pretty=format:%H%n%an <%ae>%n%ad%n%ar%n%s%n%b%n@@NUMSTAT@@%n",
                 "a1b2c3d",
             ),
             fake.argvs.single(),
@@ -366,20 +371,23 @@ class GitProbeTest {
         assertEquals("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", detail.fullHash)
         assertEquals("Alice Author", detail.author)
         assertEquals("alice@example.com", detail.email)
+        assertEquals("Thu Sep 18 12:00:00 2026 +0500", detail.dateText)
         assertEquals("2 days ago", detail.relativeDate)
         assertEquals("Add the thing", detail.subject)
-        assertEquals(3, detail.statLines.size)
-        assertEquals(0, detail.hiddenStatLines)
-        assertTrue(detail.statLines.single { it.contains("Main.kt") }.contains("4 ++--"))
+        assertEquals(listOf("The body paragraph."), detail.body)
+        assertEquals(3, detail.files.size)
+        assertEquals(0, detail.hiddenFiles)
+        assertEquals(CommitFile("src/Main.kt", added = "4", deleted = "2"), detail.files[0])
+        assertEquals(CommitFile("logo.png", added = "-", deleted = "-"), detail.files[2])
     }
 
     @Test
-    fun `showCommit caps the stat list with an honest hidden count`() {
-        val stats = (1..45).joinToString("\n") { " file-$it.kt | 1 +" }
-        val raw = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\nA <a@b.c>\nnow\nSubject\n\n$stats\n"
+    fun `showCommit caps the file list with an honest hidden count`() {
+        val stats = (1..65).joinToString("\n") { "1${'\t'}0${'\t'}file-$it.kt" }
+        val raw = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\nA <a@b.c>\nnow\nnow\nSubject\n\n@@NUMSTAT@@\n$stats\n"
         val detail = parseShowOutput(raw)!!
-        assertEquals(GitPresentation.COMMIT_STAT_MAX_LINES, detail.statLines.size)
-        assertEquals(5, detail.hiddenStatLines)
+        assertEquals(GitProbe.COMMIT_FILES_MAX, detail.files.size)
+        assertEquals(5, detail.hiddenFiles)
     }
 
     @Test
@@ -402,6 +410,127 @@ class GitProbeTest {
         val fake = FakeExec { ExecResult(exitCode = 0, stdout = "not a show block\n", stderr = "") }
         val result = GitProbe(fake).showCommit("/root/project", "a1b2c3d")
         assertTrue((result as CommitResult.Failed).reason.contains("unrecognized"))
+    }
+
+    // ------------------------------------------- history pages / files
+
+    @Test
+    fun `logPage execs the paged argv and detects hasMore by the extra entry`() {
+        val page = (1..21).joinToString("\n") { "h$it|A|now|Subject $it" }
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = page, stderr = "") }
+        val result = GitProbe(fake).logPage("/root/project", skip = 20, count = 20)
+        assertEquals(
+            listOf(
+                "git", "-C", "/root/project",
+                "log", "--skip=20", "-n", "21",
+                "--pretty=format:%h|%an|%ar|%s",
+            ),
+            fake.argvs.single(),
+        )
+        val logPage = (result as LogPageResult.Done).page
+        assertEquals(20, logPage.entries.size)
+        assertTrue(logPage.hasMore)
+        assertEquals("Subject 1", logPage.entries.first().subject)
+    }
+
+    @Test
+    fun `a short page means the history ended`() {
+        val page = (1..5).joinToString("\n") { "h$it|A|now|S$it" }
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = page, stderr = "") }
+        val page1 = (GitProbe(fake).logPage("/root/project", skip = 0, count = 20) as LogPageResult.Done).page
+        assertEquals(5, page1.entries.size)
+        assertFalse(page1.hasMore)
+    }
+
+    @Test
+    fun `listDir execs the script with the dir as argv and parses the entries`() {
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "d\tsrc\nf\tREADME.md\n@@LS-OK\n", stderr = "") }
+        val result = GitProbe(fake).listDir("/root/project/sub")
+        assertEquals(
+            listOf("/bin/sh", "-c", GitProbe.LIST_DIR_SCRIPT, "sh", "/root/project/sub"),
+            fake.argvs.single(),
+        )
+        val entries = (result as ListDirResult.Done).entries
+        assertEquals(2, entries.size)
+        assertEquals(DirEntry("src", isDir = true), entries[0])
+        assertEquals(DirEntry("README.md", isDir = false), entries[1])
+    }
+
+    @Test
+    fun `a listDir without the completion marker is a failure - never a short listing`() {
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "d\tsrc\n", stderr = "") }
+        val result = GitProbe(fake).listDir("/root/project")
+        assertTrue(result is ListDirResult.Failed)
+    }
+
+    @Test
+    fun `readHead execs the preview script and reports size, truncation, binary`() {
+        val head = (1..201).joinToString("\n") { "line $it" } + "\n"
+        val out = "@@SIZE:2048\n@@TEXT\n$head"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = out, stderr = "") }
+        val result = GitProbe(fake).readHead("/root/project/README.md")
+        assertEquals(
+            listOf("/bin/sh", "-c", GitProbe.READ_HEAD_SCRIPT, "sh", "/root/project/README.md"),
+            fake.argvs.single(),
+        )
+        val page = (result as ReadHeadResult.Done).page
+        assertEquals(2048L, page.sizeBytes)
+        assertEquals(GitProbe.PREVIEW_MAX_LINES, page.lines.size)
+        assertTrue(page.truncated)
+        assertFalse(page.isBinary)
+    }
+
+    @Test
+    fun `a NUL byte in the preview is binary - never mojibake`() {
+        val out = "@@SIZE:10\n@@TEXT\nabc\u0000def\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = out, stderr = "") }
+        val page = (GitProbe(fake).readHead("/root/f") as ReadHeadResult.Done).page
+        assertTrue(page.isBinary)
+    }
+
+    @Test
+    fun `a missing file previews as a failure with its real reason`() {
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "@@MISS\n", stderr = "") }
+        val result = GitProbe(fake).readHead("/root/nope")
+        assertEquals("not a readable file", (result as ReadHeadResult.Failed).reason)
+    }
+
+    @Test
+    fun `stashList execs the read-only argv and parses index + subject`() {
+        val out = "stash@{0}|WIP on main: abc1234 half done\nstash@{1}|label here\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = out, stderr = "") }
+        val result = GitProbe(fake).stashList("/root/project")
+        assertEquals(
+            listOf("git", "-C", "/root/project", "stash", "list", "--format=%gd|%gs"),
+            fake.argvs.single(),
+        )
+        val entries = (result as StashListResult.Done).entries
+        assertEquals(2, entries.size)
+        assertEquals(StashEntry(0, "WIP on main: abc1234 half done"), entries[0])
+        assertEquals(StashEntry(1, "label here"), entries[1])
+    }
+
+    @Test
+    fun `remoteBranches lists remote refnames without the HEAD pointer`() {
+        val out = "origin/main\norigin/HEAD\norigin/dev\nfork/main\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = out, stderr = "") }
+        val result = GitProbe(fake).remoteBranches("/root/project")
+        assertEquals(
+            listOf("git", "-C", "/root/project", "branch", "-r", "--format=%(refname:short)"),
+            fake.argvs.single(),
+        )
+        assertEquals(listOf("origin/main", "origin/dev", "fork/main"), (result as RemoteBranchesResult.Done).names)
+    }
+
+    @Test
+    fun `commitFileDiff execs the show argv for one path`() {
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "+line\n", stderr = "") }
+        val result = GitProbe(fake).commitFileDiff("/root/project", "a1b2c3d", "src/a.kt")
+        assertEquals(
+            listOf("git", "-C", "/root/project", "show", "a1b2c3d", "--", "src/a.kt"),
+            fake.argvs.single(),
+        )
+        assertTrue(result is DiffResult.Done)
     }
 
     @Test

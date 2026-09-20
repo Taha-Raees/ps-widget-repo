@@ -20,11 +20,14 @@ import app.pocketshell.packages.ExecResult
  *
  * Read-only by contract: `git --version`, `find`, `git status`,
  * `git log`, `git branch --format`, `git remote -v`, and the manual-only
- * `git show --stat` / `git diff` ([showCommit], [diffFile]) — nothing
- * that touches the index, the refs or the worktree (the Home application
- * never stages, commits or checks out; a terminal is where git work
- * happens, and the card only LOOKS). No DNS/workspace repair either — the
- * probe is offline and must never mutate the rootfs from Home.
+ * inspections (`git show --numstat`, `git show <hash> -- <path>`,
+ * `git diff`, `git log --skip` pages, `git stash list`, the directory
+ * listing and file preview scripts) — nothing here touches the index,
+ * the refs or the worktree. MUTATIONS live in [GitOps]: explicit,
+ * user-initiated, one confirmed tap = one bounded exec — the scan script
+ * itself stays strictly read-only, so background refreshing can never
+ * change a repository. No DNS/workspace repair either — the probe is
+ * offline and must never mutate the rootfs from Home.
  */
 
 /** One discovered repository's rendered snapshot. */
@@ -83,19 +86,59 @@ private val BEHIND_RE = Regex("""behind (\d+)""")
 /** One configured remote — the first URL git reports for the name. */
 internal data class Remote(val name: String, val url: String)
 
-/** One commit's `git show --stat` facts — the commit page's data. */
+/**
+ * One commit's facts — the commit page's data. The stat list is PARSED
+ * numstat (`--numstat`: added<TAB>deleted<TAB>path), not raw --stat lines,
+ * so the UI renders real per-file +/- columns instead of guessing widths.
+ */
 internal data class CommitDetail(
     /** The FULL hash (%H), distinct from the RECENT list's %h. */
     val fullHash: String,
     val author: String,
     val email: String?,
+    /** The author date (%ad) — git's own absolute rendering. */
+    val dateText: String,
+    /** The relative date (%ar) — "2 days ago" — for the compact header. */
     val relativeDate: String,
     val subject: String,
-    /** The --stat lines (path + insertions/deletions), already capped. */
-    val statLines: List<String>,
-    /** How many stat lines were cut by the cap — a real count, or zero. */
-    val hiddenStatLines: Int,
+    /** The message body (%b) below the subject; empty when there is none. */
+    val body: List<String>,
+    /** Changed files with their +/- counts ("-" = binary), capped. */
+    val files: List<CommitFile>,
+    /** How many file rows were cut by the cap — a real count, or zero. */
+    val hiddenFiles: Int,
 )
+
+/** One changed file of a commit: "src/App.kt" +12 −3 (added/deleted "-": binary). */
+internal data class CommitFile(
+    val path: String,
+    val added: String,
+    val deleted: String,
+)
+
+/** One page of a repository's history (`git log --skip=N -n M+1`). */
+internal data class LogPage(
+    val entries: List<LogEntry>,
+    /** True when the exec returned one entry MORE than asked — there is more. */
+    val hasMore: Boolean,
+)
+
+/** One worktree directory entry (the Files tab's row). */
+internal data class DirEntry(val name: String, val isDir: Boolean)
+
+/** A file preview: capped head lines + honest facts about what is not shown. */
+internal data class TextPage(
+    val lines: List<String>,
+    /** True when the file continued past the cap (the total is UNKNOWN — no fake count). */
+    val truncated: Boolean,
+    /** Real file size in bytes from `wc -c`; null when it could not be read. */
+    val sizeBytes: Long?,
+    /** True when the bytes contain NUL — shown as a fact, never mojibake. */
+    val isBinary: Boolean,
+)
+
+/** One stash entry: its index (the stash@{N} the ops address) + git's subject. */
+internal data class StashEntry(val index: Int, val subject: String)
 
 /** A working-tree or index diff, already capped for render. */
 internal data class DiffText(
@@ -104,14 +147,39 @@ internal data class DiffText(
     val hidden: Int,
 )
 
+internal sealed interface DiffResult {
+    data class Done(val text: DiffText) : DiffResult
+    data class Failed(val reason: String) : DiffResult
+}
+
 internal sealed interface CommitResult {
     data class Done(val detail: CommitDetail) : CommitResult
     data class Failed(val reason: String) : CommitResult
 }
 
-internal sealed interface DiffResult {
-    data class Done(val text: DiffText) : DiffResult
-    data class Failed(val reason: String) : DiffResult
+internal sealed interface LogPageResult {
+    data class Done(val page: LogPage) : LogPageResult
+    data class Failed(val reason: String) : LogPageResult
+}
+
+internal sealed interface ListDirResult {
+    data class Done(val entries: List<DirEntry>) : ListDirResult
+    data class Failed(val reason: String) : ListDirResult
+}
+
+internal sealed interface ReadHeadResult {
+    data class Done(val page: TextPage) : ReadHeadResult
+    data class Failed(val reason: String) : ReadHeadResult
+}
+
+internal sealed interface StashListResult {
+    data class Done(val entries: List<StashEntry>) : StashListResult
+    data class Failed(val reason: String) : StashListResult
+}
+
+internal sealed interface RemoteBranchesResult {
+    data class Done(val names: List<String>) : RemoteBranchesResult
+    data class Failed(val reason: String) : RemoteBranchesResult
 }
 
 internal sealed interface ScanResult {
@@ -198,10 +266,10 @@ internal class GitProbe(
     }
 
     /**
-     * M8.4.3 — the commit page: ONE bounded, read-only `git show --stat`
-     * for one commit. One tap = one exec; the result carries the tool's
-     * real stderr tail on failure. The hash must be bare hex (our own %h
-     * output) — anything else is refused BEFORE any exec (Sync's
+     * The commit page: ONE bounded, read-only `git show --numstat` for one
+     * commit — header facts, the message body and the parsed per-file
+     * +/- counts. One tap = one exec; the hash must be bare hex (our own
+     * %h output) — anything else is refused BEFORE any exec (Sync's
      * option-injection discipline: no guest text becomes an option).
      */
     fun showCommit(repoPath: String, hash: String): CommitResult {
@@ -210,8 +278,8 @@ internal class GitProbe(
             val out = exec.exec(
                 listOf(
                     "git", "-C", repoPath,
-                    "show", "--stat",
-                    "--pretty=format:%H%n%an <%ae>%n%ar%n%s",
+                    "show", "--numstat",
+                    "--pretty=format:%H%n%an <%ae>%n%ad%n%ar%n%s%n%b%n@@NUMSTAT@@%n",
                     hash,
                 ),
                 MANUAL_TIMEOUT_MS,
@@ -230,17 +298,199 @@ internal class GitProbe(
     }
 
     /**
-     * M8.4.3 — the diff page: ONE bounded, read-only `git diff` for one
-     * path — `--cached` for the index side of a change, plain for the
-     * worktree side. The path rides as a direct argv element after "--"
-     * (execve bytes, never reparsed — nothing to escape).
+     * The commit-file diff: ONE bounded, read-only `git show <hash> --
+     * <path>` — the same commit, one path. The path rides as a direct argv
+     * element after "--" (execve bytes, never reparsed).
      */
-    fun diffFile(repoPath: String, path: String, staged: Boolean): DiffResult = try {
-        val argv = if (staged) {
-            listOf("git", "-C", repoPath, "diff", "--cached", "--", path)
-        } else {
-            listOf("git", "-C", repoPath, "diff", "--", path)
+    fun commitFileDiff(repoPath: String, hash: String, path: String): DiffResult {
+        if (!COMMIT_HASH_RE.matches(hash)) return DiffResult.Failed("not a commit hash: $hash")
+        return diffText(
+            listOf("git", "-C", repoPath, "show", hash, "--", path),
+        )
+    }
+
+    /**
+     * One page of a repository's history: `git log --skip=<n> -n <m+1>`
+     * in the scan's pipe-separated entry format. The page size is the
+     * caller's Integer (never guest text); asking for one entry MORE than
+     * displayed is what makes [LogPage.hasMore] a fact, not a guess.
+     */
+    fun logPage(repoPath: String, skip: Int, count: Int): LogPageResult = try {
+        val out = exec.exec(
+            listOf(
+                "git", "-C", repoPath,
+                "log", "--skip=$skip", "-n", "${count + 1}",
+                "--pretty=format:%h|%an|%ar|%s",
+            ),
+            MANUAL_TIMEOUT_MS,
+        )
+        when {
+            out.error != null -> LogPageResult.Failed(out.error!!)
+            out.exitCode != 0 -> LogPageResult.Failed(
+                stderrTail(out) ?: "git exited with ${out.exitCode}",
+            )
+            else -> {
+                val entries = out.stdout.lineSequence()
+                    .filter { it.isNotBlank() }
+                    .map { it.split('|', limit = 4) }
+                    .filter { it.size == 4 && it[0].isNotBlank() }
+                    .map { LogEntry(it[0].trim(), it[1].trim(), it[2].trim(), it[3]) }
+                    .toList()
+                val hasMore = entries.size > count
+                LogPageResult.Done(LogPage(entries = entries.take(count), hasMore = hasMore))
+            }
         }
+    } catch (t: Throwable) {
+        LogPageResult.Failed(t.message ?: t.javaClass.simpleName)
+    }
+
+    /**
+     * The Files tab's directory listing: ONE bounded exec lists one
+     * worktree directory, dirs marked `d` and files `f`. The directory
+     * path rides as the script's $1 (execve bytes, never spliced into the
+     * script text — a hostile directory NAME cannot become code), and the
+     * trailing @@LS-OK marker is what makes a short stream a fact instead
+     * of a truncated one.
+     */
+    fun listDir(dirPath: String): ListDirResult = try {
+        val out = exec.exec(
+            listOf("/bin/sh", "-c", LIST_DIR_SCRIPT, "sh", dirPath),
+            MANUAL_TIMEOUT_MS,
+        )
+        when {
+            out.error != null -> ListDirResult.Failed(out.error!!)
+            !out.stdout.contains(LIST_DIR_OK) -> ListDirResult.Failed(
+                stderrTail(out) ?: "could not list this directory",
+            )
+            else -> {
+                val entries = out.stdout.lineSequence()
+                    .takeWhile { it != LIST_DIR_OK }
+                    .mapNotNull { line ->
+                        val tab = line.indexOf('\t')
+                        if (tab != 1) return@mapNotNull null
+                        val name = line.substring(2)
+                        when (line[0]) {
+                            'd' -> DirEntry(name, isDir = true)
+                            'f' -> DirEntry(name, isDir = false)
+                            else -> null
+                        }
+                    }
+                    .filter { it.name.isNotEmpty() }
+                    .toList()
+                ListDirResult.Done(entries)
+            }
+        }
+    } catch (t: Throwable) {
+        ListDirResult.Failed(t.message ?: t.javaClass.simpleName)
+    }
+
+    /**
+     * The file preview: ONE bounded exec reads size + the first lines of
+     * one worktree file (path as $1, same argv discipline as listDir).
+     * Asking for PREVIEW_MAX_LINES + 1 lines is what makes [TextPage.truncated]
+     * a fact; a NUL byte in the head is reported as binary — never rendered
+     * as mojibake.
+     */
+    fun readHead(filePath: String): ReadHeadResult = try {
+        val out = exec.exec(
+            listOf("/bin/sh", "-c", READ_HEAD_SCRIPT, "sh", filePath),
+            MANUAL_TIMEOUT_MS,
+        )
+        when {
+            out.error != null -> ReadHeadResult.Failed(out.error!!)
+            out.stdout.startsWith("@@MISS") -> ReadHeadResult.Failed("not a readable file")
+            else -> {
+                val lines = out.stdout.lineSequence().toList()
+                val sizeLine = lines.firstOrNull { it.startsWith("@@SIZE:") }
+                val textStart = lines.indexOf("@@TEXT")
+                if (sizeLine == null || textStart < 0) {
+                    ReadHeadResult.Failed("unrecognized preview output")
+                } else {
+                    val body = lines.drop(textStart + 1)
+                    val truncated = body.size > PREVIEW_MAX_LINES
+                    val shown = body.take(PREVIEW_MAX_LINES)
+                    val isBinary = shown.any { line -> line.indexOf('\u0000') >= 0 }
+                    ReadHeadResult.Done(
+                        TextPage(
+                            lines = shown,
+                            truncated = truncated,
+                            sizeBytes = sizeLine.removePrefix("@@SIZE:").trim().toLongOrNull(),
+                            isBinary = isBinary,
+                        ),
+                    )
+                }
+            }
+        }
+    } catch (t: Throwable) {
+        ReadHeadResult.Failed(t.message ?: t.javaClass.simpleName)
+    }
+
+    /**
+     * The stash list: `git stash list --format=%gd|%gs` — one bounded
+     * read-only exec; the stash@{N} index is what the stash ops address.
+     */
+    fun stashList(repoPath: String): StashListResult = try {
+        val out = exec.exec(
+            listOf("git", "-C", repoPath, "stash", "list", "--format=%gd|%gs"),
+            MANUAL_TIMEOUT_MS,
+        )
+        when {
+            out.error != null -> StashListResult.Failed(out.error!!)
+            out.exitCode != 0 -> StashListResult.Failed(
+                stderrTail(out) ?: "git exited with ${out.exitCode}",
+            )
+            else -> {
+                val entries = out.stdout.lineSequence()
+                    .filter { it.isNotBlank() }
+                    .map { it.split('|', limit = 2) }
+                    .filter { it.size == 2 }
+                    .mapNotNull { (ref, subject) ->
+                        val index = Regex("""stash@\{(\d+)}""").find(ref)
+                            ?.groupValues?.get(1)?.toIntOrNull()
+                        index?.let { StashEntry(index = it, subject = subject) }
+                    }
+                    .toList()
+                StashListResult.Done(entries)
+            }
+        }
+    } catch (t: Throwable) {
+        StashListResult.Failed(t.message ?: t.javaClass.simpleName)
+    }
+
+    /**
+     * The REMOTE branch names — one bounded, read-only `git branch -r`
+     * (the scan lists LOCAL branches only). Refnames cannot contain the
+     * separator, so a plain split is unambiguous; the cap is the
+     * defensive second bound after the script's own.
+     */
+    fun remoteBranches(repoPath: String): RemoteBranchesResult = try {
+        // The client-side take() is the bound (no head in the pipeline).
+        val out = exec.exec(
+            listOf(
+                "git", "-C", repoPath, "branch", "-r",
+                "--format=%(refname:short)",
+            ),
+            MANUAL_TIMEOUT_MS,
+        )
+        when {
+            out.error != null -> RemoteBranchesResult.Failed(out.error!!)
+            out.exitCode != 0 -> RemoteBranchesResult.Failed(
+                stderrTail(out) ?: "git exited with ${out.exitCode}",
+            )
+            else -> RemoteBranchesResult.Done(
+                out.stdout.lineSequence()
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && it.endsWith("/HEAD").not() }
+                    .take(REMOTE_BRANCH_MAX)
+                    .toList(),
+            )
+        }
+    } catch (t: Throwable) {
+        RemoteBranchesResult.Failed(t.message ?: t.javaClass.simpleName)
+    }
+
+    /** The shared bounded read of one diff-shaped git output. */
+    private fun diffText(argv: List<String>): DiffResult = try {
         val out = exec.exec(argv, MANUAL_TIMEOUT_MS)
         when {
             out.error != null -> DiffResult.Failed(out.error!!)
@@ -258,6 +508,19 @@ internal class GitProbe(
     } catch (t: Throwable) {
         DiffResult.Failed(t.message ?: t.javaClass.simpleName)
     }
+
+    /**
+     * The diff page: ONE bounded, read-only `git diff` for one path —
+     * `--cached` for the index side of a change, plain for the worktree
+     * side. The path rides as a direct argv element after "--" (execve
+     * bytes, never reparsed — nothing to escape).
+     */
+    fun diffFile(repoPath: String, path: String, staged: Boolean): DiffResult =
+        if (staged) {
+            diffText(listOf("git", "-C", repoPath, "diff", "--cached", "--", path))
+        } else {
+            diffText(listOf("git", "-C", repoPath, "diff", "--", path))
+        }
 
     private fun stderrTail(out: ExecResult): String? =
         out.stderr.lineSequence().lastOrNull { it.isNotBlank() }
@@ -306,8 +569,53 @@ internal class GitProbe(
         const val BRANCH_MAX_ENTRIES = 12
         const val REMOTE_MAX_ENTRIES = 6
 
-        /** The lone "$" — the probe script is a shell script, not a template. */
+        /** The history page asks for one MORE than it displays — hasMore is a fact. */
+        const val HISTORY_PAGE_SIZE = 20
+
+        /** The commit page shows at most this many changed-file rows. */
+        const val COMMIT_FILES_MAX = 60
+
+        /** The file preview renders at most this many lines. */
+        const val PREVIEW_MAX_LINES = 200
+
+        /** The remote-branch listing is capped — a fork's origins stay bounded. */
+        const val REMOTE_BRANCH_MAX = 40
+
+        /** The lone "$" — the probe scripts are shell scripts, not templates. */
         private const val D = "$"
+
+        /** The listDir script's completion marker — its absence = truncated. */
+        internal const val LIST_DIR_OK = "@@LS-OK"
+
+        /**
+         * The directory listing script. The directory path arrives as $1
+         * (an execve element — NEVER spliced into this text), every entry
+         * is printed as `d<TAB>name` / `f<TAB>name`, and the trailing
+         * marker line is the completion fact the parser requires.
+         */
+        internal val LIST_DIR_SCRIPT = """
+            cd "${D}1" 2>/dev/null || { echo "@@LS-FAIL"; exit 0; }
+            find . -maxdepth 1 -mindepth 1 2>/dev/null | LC_ALL=C sort | while IFS= read -r p; do
+              if [ -d "${D}p" ]; then printf 'd\t%s\n' "${D}{p#./}"; else printf 'f\t%s\n' "${D}{p#./}"; fi
+            done
+            echo "${LIST_DIR_OK}"
+        """.trimIndent()
+
+        /**
+         * The file preview script: real size first (`wc -c`), then the
+         * @@TEXT marker, then head lines (the caller asks for one MORE
+         * than it shows so truncation is a fact). The path arrives as $1.
+         */
+        internal val READ_HEAD_SCRIPT = """
+            if [ -f "${D}1" ]; then
+              printf '@@SIZE:'
+              wc -c < "${D}1"
+              printf '@@TEXT\n'
+              head -n 201 "${D}1"
+            else
+              echo "@@MISS"
+            fi
+        """.trimIndent()
 
         /**
          * THE one batched script for a whole refresh (busybox ash, Alpine):
@@ -509,15 +817,18 @@ internal fun parseRemoteBlock(lines: List<String>): List<Remote> {
 }
 
 /**
- * `git show --stat --pretty=format:%H%n%an <%ae>%n%ar%n%s` output: four
- * header lines by position (full hash, author, relative date, subject)
- * followed by the --stat block (blank separator lines dropped, capped for
- * render by [GitPresentation.capLines]). Null when the protocol cannot
- * vouch for the shape — a Failed result, never invented facts.
+ * `git show --numstat --pretty=format:%H%n%an <%ae>%n%ad%n%ar%n%s%n%b%n@@NUMSTAT@@%n`
+ * output: five header lines by position (full hash, author, absolute date,
+ * relative date, subject), the message body below the subject, the
+ * @@NUMSTAT@@ marker, then the raw `added<TAB>deleted<TAB>path` rows.
+ * Null when the protocol cannot vouch for the shape (no marker, too-short
+ * header, non-hex hash) — a Failed result, never invented facts. A numstat
+ * row that does not parse is skipped, never guessed into a file.
  */
 internal fun parseShowOutput(raw: String): CommitDetail? {
     val lines = raw.lineSequence().toList()
-    if (lines.size < 4) return null
+    val marker = lines.indexOf("@@NUMSTAT@@")
+    if (marker < 5) return null
     val fullHash = lines[0].trim()
     if (!SHOW_HASH_RE.matches(fullHash)) return null
     val authorLine = lines[1].trim()
@@ -528,16 +839,29 @@ internal fun parseShowOutput(raw: String): CommitDetail? {
     } else {
         null
     }
-    val statRaw = lines.drop(4).filter { it.isNotBlank() }
-    val capped = GitPresentation.capLines(statRaw, GitPresentation.COMMIT_STAT_MAX_LINES)
+    // The body is everything between the subject and the marker, trimmed at
+    // both ends (the format's separators add blank lines around an empty %b,
+    // and git's own convention puts a blank line before a real body).
+    val body = lines.subList(5, marker)
+        .dropLastWhile { it.isBlank() }
+        .dropWhile { it.isBlank() }
+    val statRows = lines.drop(marker + 1).filter { it.isNotBlank() }
+    val files = statRows.mapNotNull { row ->
+        val parts = row.split('\t', limit = 3)
+        if (parts.size != 3 || parts[2].isEmpty()) return@mapNotNull null
+        CommitFile(path = parts[2], added = parts[0], deleted = parts[1])
+    }
+    val capped = files.take(GitProbe.COMMIT_FILES_MAX)
     return CommitDetail(
         fullHash = fullHash,
         author = author,
         email = email,
-        relativeDate = lines[2].trim(),
-        subject = lines[3],
-        statLines = capped.lines,
-        hiddenStatLines = capped.hidden,
+        dateText = lines[2].trim(),
+        relativeDate = lines[3].trim(),
+        subject = lines[4],
+        body = body,
+        files = capped,
+        hiddenFiles = files.size - capped.size,
     )
 }
 
