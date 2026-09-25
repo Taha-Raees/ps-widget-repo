@@ -210,6 +210,48 @@ internal sealed interface GitOp {
         }
     }
 
+    // ------------------------------------------------- GitHub (via gh)
+
+    /** `gh pr create …` — publishes a pull request from a pushed branch. */
+    data class GhPrCreate(
+        val slug: String,
+        val head: String,
+        val title: String,
+        val body: String = "",
+    ) : GitOp {
+        override val kind = "gh-pr-create"
+        override val network = true
+        override fun argv(repoPath: String): List<String> {
+            val argv = listOf("gh", "pr", "create", "-R", slug, "--title", title, "--head", head)
+            return if (body.isBlank()) argv else argv + listOf("--body", body)
+        }
+    }
+
+    /** `gh pr merge <n> --merge|--squash` — merges a pull request. */
+    data class GhPrMerge(val slug: String, val number: Int, val squash: Boolean = false) : GitOp {
+        override val kind = "gh-pr-merge"
+        override val network = true
+        override fun argv(repoPath: String) =
+            listOf("gh", "pr", "merge", number.toString(), "-R", slug, if (squash) "--squash" else "--merge")
+    }
+
+    /** `gh issue create …` — opens an issue. */
+    data class GhIssueCreate(val slug: String, val title: String, val body: String = "") : GitOp {
+        override val kind = "gh-issue-create"
+        override val network = true
+        override fun argv(repoPath: String): List<String> {
+            val argv = listOf("gh", "issue", "create", "-R", slug, "--title", title)
+            return if (body.isBlank()) argv else argv + listOf("--body", body)
+        }
+    }
+
+    /** `gh issue close <n>` — closes an issue. */
+    data class GhIssueClose(val slug: String, val number: Int) : GitOp {
+        override val kind = "gh-issue-close"
+        override val network = true
+        override fun argv(repoPath: String) = listOf("gh", "issue", "close", number.toString(), "-R", slug)
+    }
+
     // ------------------------------------------------------------ branches
 
     /** `git switch <name>` — check out an existing branch (`git` refuses a dirty collision). */
@@ -346,6 +388,21 @@ private fun base(repoPath: String, vararg args: String): List<String> =
  * property of the code rather than a habit of the UI.
  */
 internal object GitOps {
+
+    /** The slug a gh op addresses — `owner/repo`, validated like a ref path. */
+    private val SLUG_RE = Regex("""[A-Za-z0-9._-]+/[A-Za-z0-9._-]+""")
+
+    private fun slugRefusal(slug: String): String? = when {
+        !SLUG_RE.matches(slug) -> "\"$slug\" is not an owner/repo pair"
+        else -> null
+    }
+
+    private fun ghTitleRefusal(title: String, what: String): String? = when {
+        title.isBlank() -> "a $what needs a title"
+        title.length > COMMIT_SUBJECT_LIMIT -> "the title is longer than $COMMIT_SUBJECT_LIMIT characters"
+        title.contains('\u0000') -> "the title contains a NUL byte"
+        else -> null
+    }
 
     /** A mutation that must be confirmed before it runs. */
     data class ConfirmSpec(val title: String, val body: String, val confirmWord: String)
@@ -492,6 +549,31 @@ internal object GitOps {
                 "commit or stash them there first.",
             confirmWord = "Remove",
         )
+        is GitOp.GhPrMerge -> ConfirmSpec(
+            title = "Merge PR #${op.number}?",
+            body = if (op.squash) {
+                "Squash-merges into the base branch on GitHub — one commit replaces the branch's history."
+            } else {
+                "Merges into the base branch on GitHub with a merge commit."
+            },
+            confirmWord = "Merge",
+        )
+        is GitOp.GhPrCreate -> ConfirmSpec(
+            title = "Open pull request from \"${op.head}\"?",
+            body = "Publishes the branch and opens a pull request on ${op.slug}. " +
+                "The branch must already be pushed.",
+            confirmWord = "Open PR",
+        )
+        is GitOp.GhIssueCreate -> ConfirmSpec(
+            title = "Open issue on ${op.slug}?",
+            body = "Publishes a new issue titled \"${op.title}\".",
+            confirmWord = "Open issue",
+        )
+        is GitOp.GhIssueClose -> ConfirmSpec(
+            title = "Close issue #${op.number}?",
+            body = "Closes the issue on ${op.slug}. It can be reopened later.",
+            confirmWord = "Close",
+        )
         else -> null
     }
 
@@ -540,6 +622,10 @@ internal object GitOps {
             op.value.contains('\u0000') -> "the value contains a NUL byte"
             else -> null
         }
+        is GitOp.GhPrCreate -> slugRefusal(op.slug) ?: refRefusal(op.head) ?: ghTitleRefusal(op.title, "pull request")
+        is GitOp.GhPrMerge -> slugRefusal(op.slug) ?: indexRefusal(op.number - 1)
+        is GitOp.GhIssueCreate -> slugRefusal(op.slug) ?: ghTitleRefusal(op.title, "issue")
+        is GitOp.GhIssueClose -> slugRefusal(op.slug) ?: indexRefusal(op.number - 1)
         GitOp.StageAll, GitOp.DiscardTrackedAll, is GitOp.UnstageAll -> null
     }
 
@@ -705,6 +791,10 @@ internal object GitOps {
         is GitOp.WorktreeAdd -> "Add worktree"
         is GitOp.WorktreeRemove -> "Remove worktree"
         is GitOp.ConfigSet -> "Set"
+        is GitOp.GhPrCreate -> "Open PR"
+        is GitOp.GhPrMerge -> "Merge PR"
+        is GitOp.GhIssueCreate -> "Open issue"
+        is GitOp.GhIssueClose -> "Close issue"
     }
 
     /** What a running op says (present tense — the work really is in flight). */
@@ -738,6 +828,10 @@ internal object GitOps {
         is GitOp.WorktreeAdd -> "Adding worktree…"
         is GitOp.WorktreeRemove -> "Removing worktree…"
         is GitOp.ConfigSet -> "Setting…"
+        is GitOp.GhPrCreate -> "Opening pull request…"
+        is GitOp.GhPrMerge -> "Merging pull request…"
+        is GitOp.GhIssueCreate -> "Opening issue…"
+        is GitOp.GhIssueClose -> "Closing issue…"
     }
 }
 

@@ -43,9 +43,14 @@ if [ -f local.properties ]; then
     SDK_DIR=$(grep -E '^sdk\.dir=' local.properties | cut -d= -f2-)
 fi
 SDK_DIR="${SDK_DIR:-${ANDROID_HOME:-$HOME/Android/Sdk}}"
-D8="$SDK_DIR/build-tools/36.1.0/d8"
+# d8: prefer build-tools 36.1.0 (what the app builds with); fall back to
+# the newest installed build-tools dir so an SDK without 36.1.0 still works.
+D8=""
+for BT in "$SDK_DIR/build-tools/36.1.0" "$(ls -1d "$SDK_DIR"/build-tools/* 2>/dev/null | sort -V | tail -1)"; do
+    [ -x "$BT/d8" ] && { D8="$BT/d8"; break; }
+done
 ANDROID_JAR="$SDK_DIR/platforms/android-36/android.jar"
-[ -x "$D8" ] || { echo "FATAL: d8 not found at $D8 (build-tools 36.1.0)" >&2; exit 1; }
+[ -x "$D8" ] || { echo "FATAL: d8 not found under $SDK_DIR/build-tools (install build-tools 36.1.0)" >&2; exit 1; }
 [ -f "$ANDROID_JAR" ] || { echo "FATAL: android.jar not found at $ANDROID_JAR (platform android-36)" >&2; exit 1; }
 
 # --- 1. compile ---------------------------------------------------------------------

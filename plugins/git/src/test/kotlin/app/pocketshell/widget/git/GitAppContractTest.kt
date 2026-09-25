@@ -45,12 +45,13 @@ class GitAppContractTest {
     }
 
     private fun uiSources(): List<Pair<String, String>> =
-        listOf("GitApp.kt", "GitComponents.kt", "GitScreens.kt", "GitDetails.kt")
+        listOf("GitApp.kt", "GitComponents.kt", "GitScreens.kt", "GitDetails.kt", "GitHostUi.kt")
             .map { it to gitSource(it) }
 
     private fun ruleSources(): List<String> =
         listOf("GitProbe.kt", "GitStatusParser.kt", "GitPresentation.kt", "GitReads.kt",
-            "GitOps.kt", "GitFiles.kt", "GitDiffParser.kt", "GitQuoted.kt", "GitLayout.kt")
+            "GitOps.kt", "GitFiles.kt", "GitDiffParser.kt", "GitQuoted.kt", "GitLayout.kt",
+            "GitHost.kt")
 
     /** Comments + string CONTENTS stripped — structural tokens only. */
     private fun stripCommentsAndStrings(source: String): String {

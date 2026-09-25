@@ -30,15 +30,15 @@
     {
       "id": "git",
       "name": "Git",
-      "summary": "Repositories in the Linux guest — branch, dirty state, ahead/behind",
+      "summary": "Repositories in the Linux guest — changes, history, branches, files, remotes",
       "author": "PocketShell core",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/git.json",
       "plugin": {
         "className": "app.pocketshell.widget.git.GitPlugin",
-        "dex": "releases/git/2.0.0/plugin.jar",
-        "sha256": "24cedb6f9fe03d5292adaeccd3bbc32d768beabe0d55bb728c62241946f8c227"
+        "dex": "releases/git/3.0.0/plugin.jar",
+        "sha256": "726d83769714dac20564d89dd77383907810f137b585e108417e9c51492ea055"
       }
     },
     {

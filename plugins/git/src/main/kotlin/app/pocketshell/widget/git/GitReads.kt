@@ -602,7 +602,7 @@ internal const val FIELD_SEP = "\u001f"
  * quote-aware splitter and map, skipping malformed rows rather than
  * guessing them into data.
  */
-private inline fun <T> parseSimpleRows(
+internal inline fun <T> parseSimpleRows(
     lines: List<String>,
     limit: Int,
     map: (fields: List<String>) -> T?,
@@ -611,7 +611,7 @@ private inline fun <T> parseSimpleRows(
     for (line in lines) {
         if (out.size >= limit) break
         if (line.isBlank()) continue
-        map(GitQuoted.splitTabFields(line, limit = 4))?.let { out += it }
+        map(GitQuoted.splitTabFields(line, limit = 6))?.let { out += it }
     }
     return out
 }

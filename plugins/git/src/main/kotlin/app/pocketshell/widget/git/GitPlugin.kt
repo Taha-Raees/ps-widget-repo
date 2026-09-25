@@ -12,7 +12,7 @@ import app.pocketshell.widget.plugin.WidgetPlugin
 class GitPlugin : WidgetPlugin {
 
     override val pluginId: String = "git"
-    override val pluginVersion: String = "2.0.0"
+    override val pluginVersion: String = "3.0.0"
 
     override fun create(androidContext: Context): HomeApplication = GitApp
 }

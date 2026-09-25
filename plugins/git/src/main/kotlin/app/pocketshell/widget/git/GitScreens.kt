@@ -388,6 +388,7 @@ internal fun GitWorkspace(
                 RepoTab.FILES -> FilesTab(repo, state, onOpenDiff, onOpenFile)
                 RepoTab.REMOTES -> RemotesTab(repo, state, onOp)
                 RepoTab.REPO -> RepositoryTab(repo, state, onOp)
+                RepoTab.HOST -> GitGitHubTab(repo, state, onOp, onOpenTerminal)
             }
         }
     }
@@ -1319,9 +1320,13 @@ private fun SparseSection(repo: RepoSnapshot, state: GitState) {
  * before anything runs — the dialog only ASSEMBLES the request.
  */
 @Composable
-private fun CommitDialog(
+internal fun CommitDialog(
     onCommit: (subject: String, body: String, amend: Boolean) -> Unit,
     onDismiss: () -> Unit,
+    headline: String = "Commit staged changes",
+    subjectLabel: String = "Subject",
+    bodyLabel: String = "Body (optional)",
+    confirmWord: String = "Commit",
 ) {
     var subject by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
@@ -1330,7 +1335,7 @@ private fun CommitDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = { onCommit(subject, body, amend) }, enabled = subject.isNotBlank()) {
-                Text("Commit", fontFamily = TerminalTheme.mono, color = HomeTokens.accent)
+                Text(confirmWord, fontFamily = TerminalTheme.mono, color = HomeTokens.accent)
             }
         },
         dismissButton = {
@@ -1338,13 +1343,13 @@ private fun CommitDialog(
                 Text("Cancel", fontFamily = TerminalTheme.mono, color = HomeTokens.textDim)
             }
         },
-        title = { MonoText(text = "Commit staged changes", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+        title = { MonoText(text = headline, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 OutlinedTextField(
                     value = subject,
                     onValueChange = { subject = it },
-                    label = { Text("Subject", fontFamily = TerminalTheme.mono, fontSize = 11.sp) },
+                    label = { Text(subjectLabel, fontFamily = TerminalTheme.mono, fontSize = 11.sp) },
                     textStyle = TextStyle(fontFamily = TerminalTheme.mono, fontSize = 12.sp, color = HomeTokens.textPrimary),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -1353,26 +1358,28 @@ private fun CommitDialog(
                 OutlinedTextField(
                     value = body,
                     onValueChange = { body = it },
-                    label = { Text("Body (optional)", fontFamily = TerminalTheme.mono, fontSize = 11.sp) },
+                    label = { Text(bodyLabel, fontFamily = TerminalTheme.mono, fontSize = 11.sp) },
                     textStyle = TextStyle(fontFamily = TerminalTheme.mono, fontSize = 12.sp, color = HomeTokens.textPrimary),
                     minLines = 2,
                     maxLines = 5,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(role = Role.Checkbox, onClickLabel = "Amend the last commit") { amend = !amend }
-                        .padding(top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    MonoText(
-                        text = if (amend) "[x]" else "[ ]",
-                        color = if (amend) HomeTokens.accent else HomeTokens.textDim,
-                        fontSize = 12.sp,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    MonoText(text = "Amend the last commit (rewrites it)", color = HomeTokens.textDim, fontSize = 11.sp)
+                if (headline == "Commit staged changes") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Checkbox, onClickLabel = "Amend the last commit") { amend = !amend }
+                            .padding(top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MonoText(
+                            text = if (amend) "[x]" else "[ ]",
+                            color = if (amend) HomeTokens.accent else HomeTokens.textDim,
+                            fontSize = 12.sp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        MonoText(text = "Amend the last commit (rewrites it)", color = HomeTokens.textDim, fontSize = 11.sp)
+                    }
                 }
             }
         },

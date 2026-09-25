@@ -86,6 +86,7 @@ object GitApp : HomeApplication() {
                     probe = GitProbe(exec),
                     reader = GitReader(exec),
                     ops = GitOpRunner(exec),
+                    host = GitHost(exec),
                 )
             }
         }
@@ -230,6 +231,15 @@ object GitApp : HomeApplication() {
                     onOp = { op -> state.requestOp(op, top.repoPath) },
                     onOpenTerminal = { context.nav.openTerminal() },
                 )
+
+                is Screen.PrPage -> GitPrScreen(
+                    state = state,
+                    repoPath = top.repoPath,
+                    slug = top.slug,
+                    number = top.number,
+                    onBack = { state.back() },
+                    onOp = { op -> state.requestOp(op, top.repoPath) },
+                )
             }
         }
     }
@@ -291,6 +301,13 @@ internal sealed interface Screen {
         override val repoPath: String,
         val path: String,
     ) : Screen
+
+    /** One GitHub pull request's page. */
+    data class PrPage(
+        override val repoPath: String,
+        val slug: String,
+        val number: Int,
+    ) : Screen
 }
 
 /** The repository workspace's tabs. */
@@ -302,6 +319,7 @@ internal enum class RepoTab(val label: String) {
     FILES("Files"),
     REMOTES("Remotes"),
     REPO("Repo"),
+    HOST("GitHub"),
 }
 
 // ----------------------------------------------------------------- reads
@@ -351,6 +369,13 @@ internal data class DiffReq(val repoPath: String, val target: DiffTarget, val se
 
 internal data class FilePathReq(val repoPath: String, val path: String, val serial: Int)
 
+internal data class PrReq(
+    val repoPath: String,
+    val slug: String,
+    val number: Int,
+    val serial: Int,
+)
+
 // ------------------------------------------------------------------- ops
 
 /** One op awaiting (or running) — carries the confirm wording it earned. */
@@ -374,6 +399,7 @@ internal class GitState(
     val probe: GitProbe,
     val reader: GitReader,
     val ops: GitOpRunner,
+    val host: GitHost,
 ) {
     // The dashboard's batched answer (probe-driven, never invented).
     var ui by mutableStateOf<GitUi>(GitUi.Probing)
@@ -442,6 +468,16 @@ internal class GitState(
     val lfs = ReadSlot<RepoReq, TextPage>()
     val sparse = ReadSlot<RepoReq, TextPage>()
     val identity = ReadSlot<RepoReq, Identity>()
+
+    // The GitHub layer — only read when the GitHub tab is open and the
+    // host seam answers (gh installed + authed + a GitHub remote).
+    val hostStatus = ReadSlot<RepoReq, GitHost.HostStatus>()
+    val prs = ReadSlot<RepoReq, List<GitHost.PrSummary>>()
+    val prDetail = ReadSlot<PrReq, GitHost.PrDetail>()
+    val issues = ReadSlot<RepoReq, List<GitHost.IssueSummary>>()
+    val runs = ReadSlot<RepoReq, List<GitHost.RunRow>>()
+    val releases = ReadSlot<RepoReq, List<GitHost.ReleaseRow>>()
+    val notes = ReadSlot<RepoReq, List<GitHost.NoteRow>>()
 
     /**
      * The mutation epoch: every completed op bumps it, and every read slot
