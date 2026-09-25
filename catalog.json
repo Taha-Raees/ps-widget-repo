@@ -32,13 +32,13 @@
       "name": "Git",
       "summary": "Repositories in the Linux guest — changes, history, branches, files, remotes",
       "author": "PocketShell core",
-      "version": "3.0.0",
+      "version": "3.1.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/git.json",
       "plugin": {
         "className": "app.pocketshell.widget.git.GitPlugin",
-        "dex": "releases/git/3.0.0/plugin.jar",
-        "sha256": "726d83769714dac20564d89dd77383907810f137b585e108417e9c51492ea055"
+        "dex": "releases/git/3.1.0/plugin.jar",
+        "sha256": "ac43ad6e902da5a0a7ec59367d4200249dc47441f8114c26d4bf920d47330da1"
       }
     },
     {

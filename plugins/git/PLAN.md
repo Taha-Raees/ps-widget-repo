@@ -3,7 +3,7 @@
 > **STATUS (2026-09-25): COMPLETE through M6 on this branch.**
 > M0–M2 shipped in `e7c6c0a` (data layer repaired + full UI + mutations),
 > M3 in `5376b19` (deep reads), M4 + M6 in `e0dcc2f` (GitHub layer +
-> 3.0.0 publish: `releases/git/3.0.0/plugin.jar`, catalog pinned,
+> 3.0.0 publish) — REPUBLISHED AS 3.1.0 (`releases/git/3.1.0/plugin.jar`, catalog pinned,
 > validate-catalog green, 149 unit tests green). The remaining gate is
 > ON-DEVICE acceptance: install the artifact via the app's plugin flow
 > and exercise dashboard → workspace → stage → commit → push.

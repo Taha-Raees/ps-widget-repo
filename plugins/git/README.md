@@ -11,7 +11,7 @@ SHA-256 and loads with `DexClassLoader`.
 |---|---|
 | Catalog id | `git` |
 | Entry class | `app.pocketshell.widget.git.GitPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.0.0` |
+| Current version | `3.1.0` |
 | Namespace | `app.pocketshell.widget.git` |
 | Source of truth | THIS directory |
 
@@ -62,13 +62,13 @@ Moved from the PocketShell app repository
 (`plugins/git/src/**` at pocketshell commit `94a2f72`, the M8.5 plugin-platform
 commit). Git history cannot follow across repositories — use
 `git log --follow plugins/git` **in the PocketShell checkout** for the
-pre-move history. 2.0.0 was the read-only overview card; 3.0.0 is the
-workstation.
+pre-move history. 2.0.0 was the read-only overview card; 3.0.0/3.1.0 are the
+workstation (3.1.0 supersedes a parallel 3.0.0 build).
 
 ## Build / publish
 
 ```bash
 ./gradlew :plugins:git:assembleDebug :plugins:git:testDebugUnitTest
-tools/build-plugin.sh git 3.0.0               # build + dex to releases/git/3.0.0/plugin.jar
+tools/build-plugin.sh git 3.1.0               # build + dex to releases/git/3.1.0/plugin.jar
 tools/build-plugin.sh git 3.0.1 --update-catalog   # publish a new version + pin sha256 in catalog.json
 ```
