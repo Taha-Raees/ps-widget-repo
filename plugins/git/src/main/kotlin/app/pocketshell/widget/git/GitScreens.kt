@@ -387,6 +387,7 @@ internal fun GitWorkspace(
                 RepoTab.BRANCHES -> BranchesTab(repo, state, onOp)
                 RepoTab.FILES -> FilesTab(repo, state, onOpenDiff, onOpenFile)
                 RepoTab.REMOTES -> RemotesTab(repo, state, onOp)
+                RepoTab.REPO -> RepositoryTab(repo, state, onOp)
             }
         }
     }
@@ -659,6 +660,13 @@ private fun HistoryTab(repo: RepoSnapshot, state: GitState, onOpenCommit: (Strin
     ReadEffect(slot = slot, epoch = state.readEpoch) { req ->
         state.reader.history(req.repoPath, req.window)
     }
+
+    // The graph and the reflog are opt-in reads — one tap, one bounded exec.
+    var showGraph by remember(repo.path) { mutableStateOf(false) }
+    var showReflog by remember(repo.path) { mutableStateOf(false) }
+    if (showGraph) {
+        GraphSection(repo, state)
+    }
     when (val ui = slot.ui) {
         ReadUi.Idle, ReadUi.Loading -> StateLine("Loading history…")
         is ReadUi.Failed -> FailedRead("git log failed", ui.reason)
@@ -682,6 +690,14 @@ private fun HistoryTab(repo: RepoSnapshot, state: GitState, onOpenCommit: (Strin
                 }
             }
         }
+    }
+    Spacer(Modifier.height(4.dp))
+    Row {
+        TextAction(if (showGraph) "HIDE GRAPH" else "SHOW GRAPH", onClick = { showGraph = !showGraph })
+        TextAction(if (showReflog) "HIDE REFLOG" else "SHOW REFLOG", onClick = { showReflog = !showReflog })
+    }
+    if (showReflog) {
+        ReflogSection(repo, state)
     }
 }
 
@@ -784,6 +800,127 @@ private fun BranchesTab(repo: RepoSnapshot, state: GitState, onOp: (GitOp) -> Un
             ),
             onDismiss = { sheetRemote = null },
         )
+    }
+
+    TagsSection(repo, state, onOp)
+}
+
+// ---------------------------------------------------------- tags section
+
+@Composable
+private fun TagsSection(repo: RepoSnapshot, state: GitState, onOp: (GitOp) -> Unit) {
+    val slot = state.tags
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.tags(req.repoPath) }
+
+    var sheetTag by remember(repo.path) { mutableStateOf<TagRow?>(null) }
+    var creating by remember(repo.path) { mutableStateOf(false) }
+    sheetTag?.let { tag ->
+        ActionSheet(
+            title = tag.name,
+            actions = listOf(
+                "Delete tag" to { onOp(GitOp.TagDelete(name = tag.name)) },
+            ),
+            onDismiss = { sheetTag = null },
+        )
+    }
+    if (creating) {
+        PromptDialog(
+            title = "Create tag at HEAD",
+            label = "Tag name",
+            confirmWord = "Tag",
+            onConfirm = { name -> creating = false; onOp(GitOp.TagCreate(name = name)) },
+            onDismiss = { creating = false },
+        )
+    }
+
+    GitSection("TAGS")
+    Row {
+        TextAction("NEW TAG", onClick = { creating = true })
+    }
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> Unit
+        is ReadUi.Failed -> FailedRead("tag list failed", ui.reason)
+        is ReadUi.Done -> {
+            val tags = ui.value
+            if (tags.isEmpty) {
+                StateLine("No tags.")
+            } else {
+                tags.items.forEach { tag ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Button, onClickLabel = "Tag ${tag.name}") { sheetTag = tag }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MonoText(text = tag.name, modifier = Modifier.weight(1f))
+                        MonoText(text = "${tag.hash} · ${tag.date}", color = HomeTokens.textDim, fontSize = 10.sp)
+                    }
+                }
+                CapFooter(hidden = tags.hidden, what = "tags")
+            }
+        }
+    }
+}
+
+// --------------------------------------------------- history extras
+
+@Composable
+private fun GraphSection(repo: RepoSnapshot, state: GitState) {
+    val slot = state.graph
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.graph(req.repoPath) }
+    GitSection("GRAPH")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> StateLine("Drawing…")
+        is ReadUi.Failed -> FailedRead("git log --graph failed", ui.reason)
+        is ReadUi.Done -> {
+            ui.value.lines.forEach { line ->
+                MonoText(text = line, fontSize = 10.sp, maxLines = 1)
+            }
+            CapFooter(hidden = ui.value.hidden, what = "graph lines")
+        }
+    }
+}
+
+@Composable
+private fun ReflogSection(repo: RepoSnapshot, state: GitState) {
+    val slot = state.reflog
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.reflog(req.repoPath) }
+    GitSection("REFLOG")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> StateLine("Reading…")
+        is ReadUi.Failed -> FailedRead("git reflog failed", ui.reason)
+        is ReadUi.Done -> {
+            val entries = ui.value
+            if (entries.isEmpty()) {
+                StateLine("No reflog entries.")
+            } else {
+                entries.forEach { entry ->
+                    Row(modifier = Modifier.padding(vertical = 1.dp)) {
+                        MonoText(text = entry.hash, color = HomeTokens.textDim, modifier = Modifier.width(64.dp))
+                        MonoText(text = entry.subject, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -947,6 +1084,230 @@ private fun RemotesTab(repo: RepoSnapshot, state: GitState, onOp: (GitOp) -> Uni
             fontSize = 10.sp,
             modifier = Modifier.padding(top = 6.dp),
         )
+    }
+}
+
+// ------------------------------------------------------------ repo tab
+
+/** The repository tab: identity, worktrees, submodules, LFS, sparse cone. */
+@Composable
+private fun RepositoryTab(repo: RepoSnapshot, state: GitState, onOp: (GitOp) -> Unit) {
+    IdentitySection(repo, state, onOp)
+    WorktreesSection(repo, state, onOp)
+    SubmodulesSection(repo, state)
+    LfsSection(repo, state)
+    SparseSection(repo, state)
+}
+
+@Composable
+private fun IdentitySection(repo: RepoSnapshot, state: GitState, onOp: (GitOp) -> Unit) {
+    val slot = state.identity
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.identity(req.repoPath) }
+
+    var editing by remember(repo.path) { mutableStateOf<String?>(null) }
+    editing?.let { key ->
+        PromptDialog(
+            title = "Set $key",
+            label = key,
+            confirmWord = "Set",
+            onConfirm = { value -> onOp(GitOp.ConfigSet(key = key, value = value)); editing = null },
+            onDismiss = { editing = null },
+        )
+    }
+
+    GitSection("IDENTITY")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> StateLine("Reading…")
+        is ReadUi.Failed -> FailedRead("git config failed", ui.reason)
+        is ReadUi.Done -> {
+            val identity = ui.value
+            LabelRow("NAME", identity.name ?: "not set")
+            LabelRow("EMAIL", identity.email ?: "not set")
+            if (!identity.complete) {
+                MonoText(
+                    text = "Commits need an identity — set it here or in a terminal.",
+                    color = HomeTokens.textDim,
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Row {
+                TextAction("SET NAME", onClick = { editing = "user.name" })
+                TextAction("SET EMAIL", onClick = { editing = "user.email" })
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorktreesSection(repo: RepoSnapshot, state: GitState, onOp: (GitOp) -> Unit) {
+    val slot = state.worktrees
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.worktrees(req.repoPath) }
+
+    var adding by remember(repo.path) { mutableStateOf(false) }
+    var sheetTree by remember(repo.path) { mutableStateOf<WorktreeRow?>(null) }
+    if (adding) {
+        PromptDialog(
+            title = "Add worktree",
+            label = "Directory name (a sibling of the repository)",
+            confirmWord = "Add",
+            onConfirm = { name ->
+                adding = false
+                val parent = repo.path.substringBeforeLast('/')
+                onOp(GitOp.WorktreeAdd(path = "$parent/$name"))
+            },
+            onDismiss = { adding = false },
+        )
+    }
+    sheetTree?.let { tree ->
+        ActionSheet(
+            title = tree.path,
+            actions = if (tree.path == repo.path) {
+                listOf("This is the main worktree" to {})
+            } else {
+                listOf("Remove it" to { onOp(GitOp.WorktreeRemove(path = tree.path)) })
+            },
+            onDismiss = { sheetTree = null },
+        )
+    }
+
+    GitSection("WORKTREES")
+    Row {
+        TextAction("ADD WORKTREE", onClick = { adding = true })
+    }
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> Unit
+        is ReadUi.Failed -> FailedRead("git worktree list failed", ui.reason)
+        is ReadUi.Done -> {
+            val trees = ui.value
+            if (trees.isEmpty()) {
+                StateLine("No worktrees reported.")
+            } else {
+                trees.forEach { tree ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(role = Role.Button, onClickLabel = "Worktree ${tree.path}") { sheetTree = tree }
+                            .padding(vertical = 2.dp),
+                    ) {
+                        MonoText(
+                            text = displayGuestRepoPath(tree.path),
+                            modifier = Modifier.weight(1f),
+                        )
+                        MonoText(
+                            text = when {
+                                tree.bare -> "bare"
+                                tree.detached -> "detached"
+                                tree.branch != null -> tree.branch
+                                else -> "?"
+                            },
+                            color = HomeTokens.textDim,
+                            fontSize = 10.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubmodulesSection(repo: RepoSnapshot, state: GitState) {
+    val slot = state.submodules
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.submodules(req.repoPath) }
+    GitSection("SUBMODULES")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> Unit
+        is ReadUi.Failed -> StateLine("No submodules (or git could not list them).")
+        is ReadUi.Done -> {
+            val subs = ui.value
+            if (subs.isEmpty()) {
+                StateLine("No submodules.")
+            } else {
+                subs.forEach { sub ->
+                    Row(modifier = Modifier.padding(vertical = 1.dp)) {
+                        MonoText(
+                            text = sub.status.toString(),
+                            color = if (sub.inSync) HomeTokens.runningGreen else HomeTokens.danger,
+                            modifier = Modifier.width(16.dp),
+                        )
+                        MonoText(text = sub.path, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                        if (sub.describe.isNotEmpty()) {
+                            MonoText(text = sub.describe, color = HomeTokens.textDim, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LfsSection(repo: RepoSnapshot, state: GitState) {
+    val slot = state.lfs
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.lfsFiles(req.repoPath) }
+    GitSection("GIT LFS")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> Unit
+        is ReadUi.Failed -> StateLine("git-lfs is not installed (or this repository does not use it).")
+        is ReadUi.Done -> {
+            val page = ui.value
+            if (page.lines.isEmpty()) {
+                StateLine("No LFS-tracked files.")
+            } else {
+                page.lines.forEach { line -> MonoText(text = line, fontSize = 10.sp) }
+                CapFooter(hidden = page.hidden, what = "LFS files")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SparseSection(repo: RepoSnapshot, state: GitState) {
+    val slot = state.sparse
+    LaunchedEffect(repo.path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repo.path || slot.servedEpoch < state.readEpoch) {
+            slot.open(RepoReq(repoPath = repo.path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req -> state.reader.sparseCheckout(req.repoPath) }
+    GitSection("SPARSE CHECKOUT")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> Unit
+        is ReadUi.Failed -> StateLine("Not using sparse checkout.")
+        is ReadUi.Done -> {
+            val page = ui.value
+            if (page.lines.isEmpty()) {
+                StateLine("Sparse checkout enabled — empty cone.")
+            } else {
+                page.lines.forEach { line -> MonoText(text = line, fontSize = 10.sp) }
+            }
+        }
     }
 }
 

@@ -13,6 +13,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -279,6 +283,78 @@ internal fun GitFileScreen(
         }
         Row {
             TextAction("TERMINAL", onClick = onOpenTerminal)
+        }
+
+        // This file's own history and blame — opt-in bounded reads.
+        var showHistory by remember(path) { mutableStateOf(false) }
+        var showBlame by remember(path) { mutableStateOf(false) }
+        Spacer(Modifier.height(4.dp))
+        Row {
+            TextAction(if (showHistory) "HIDE HISTORY" else "FILE HISTORY", onClick = { showHistory = !showHistory })
+            TextAction(if (showBlame) "HIDE BLAME" else "BLAME", onClick = { showBlame = !showBlame })
+        }
+        if (showHistory) {
+            FileHistorySection(state, repoPath, path)
+        }
+        if (showBlame) {
+            BlameSection(state, repoPath, path)
+        }
+    }
+}
+
+@Composable
+private fun FileHistorySection(state: GitState, repoPath: String, path: String) {
+    val slot = state.fileHistory
+    LaunchedEffect(path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repoPath || cur.path != path || slot.servedEpoch < state.readEpoch) {
+            slot.open(FilePathReq(repoPath = repoPath, path = path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req ->
+        state.reader.fileHistory(req.repoPath, req.path, limit = 30)
+    }
+    GitSection("HISTORY")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> StateLine("Reading…")
+        is ReadUi.Failed -> FailedRead("git log failed", ui.reason)
+        is ReadUi.Done -> {
+            val commits = ui.value
+            if (commits.isEmpty()) {
+                StateLine("No commits touch this file.")
+            } else {
+                commits.forEach { entry ->
+                    Row(modifier = Modifier.padding(vertical = 1.dp)) {
+                        MonoText(text = entry.hash, color = HomeTokens.textDim, modifier = Modifier.width(64.dp))
+                        MonoText(text = entry.subject, fontSize = 10.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BlameSection(state: GitState, repoPath: String, path: String) {
+    val slot = state.blame
+    LaunchedEffect(path, state.readEpoch) {
+        val cur = slot.req
+        if (cur == null || cur.repoPath != repoPath || cur.path != path || slot.servedEpoch < state.readEpoch) {
+            slot.open(FilePathReq(repoPath = repoPath, path = path, serial = state.navSerial))
+        }
+    }
+    ReadEffect(slot = slot, epoch = state.readEpoch) { req ->
+        state.reader.blame(req.repoPath, req.path)
+    }
+    GitSection("BLAME")
+    when (val ui = slot.ui) {
+        ReadUi.Idle, ReadUi.Loading -> StateLine("Reading…")
+        is ReadUi.Failed -> FailedRead("git blame failed", ui.reason)
+        is ReadUi.Done -> {
+            ui.value.lines.forEach { line ->
+                MonoText(text = line, fontSize = 9.sp, maxLines = 1)
+            }
+            CapFooter(hidden = ui.value.hidden, what = "blame lines")
         }
     }
 }

@@ -2,6 +2,8 @@ package app.pocketshell.widget.git
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -273,6 +275,7 @@ internal fun TabBar(tabs: List<RepoTab>, selected: RepoTab, onSelect: (RepoTab) 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(top = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {

@@ -2,6 +2,7 @@ package app.pocketshell.widget.git
 
 import app.pocketshell.packages.ExecResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -196,6 +197,117 @@ class GitReaderTest {
         assertEquals(1, lines[1].oldLine)
         assertEquals("new", lines[2].text)
         assertEquals(1, lines[2].newLine)
+    }
+
+    // ------------------------------------------------------ deep reads
+
+    @Test
+    fun `blame execs the pinned argv and caps the page`() {
+        val stdout = (1 until 12).joinToString("\n") { "hash$it (A 2026-01-01 $it) line $it" } + "\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = stdout, stderr = "") }
+        val page = (reader(fake).blame("/root/project", "src/a.kt", maxLines = 10) as ReadResult.Done).value
+        assertEquals(listOf("git", "-C", "/root/project", "blame", "-l", "--", "src/a.kt"), fake.argvs.single())
+        assertEquals(10, page.lines.size)
+        assertEquals(1, page.hidden)
+    }
+
+    @Test
+    fun `file history execs log for the path`() {
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "", stderr = "") }
+        reader(fake).fileHistory("/root/project", "src/a.kt", limit = 30)
+        assertEquals(
+            listOf(
+                "git", "-C", "/root/project", "log", "-n", "30",
+                "--pretty=format:${GitReader.LOG_FORMAT}", "--", "src/a.kt",
+            ),
+            fake.argvs.single(),
+        )
+    }
+
+    @Test
+    fun `reflog rows parse hash and subject`() {
+        val fake = FakeExec {
+            ExecResult(exitCode = 0, stdout = "a1b2c3d\tcommit: add the thing\ne4f5a6b\tcheckout: moving to main\n", stderr = "")
+        }
+        val entries = (reader(fake).reflog("/root/project") as ReadResult.Done).value
+        assertEquals(2, entries.size)
+        assertEquals("a1b2c3d", entries[0].hash)
+        assertEquals("commit: add the thing", entries[0].subject)
+    }
+
+    @Test
+    fun `tags parse name hash and date with a bounded total`() {
+        val lines = (0 until 45).joinToString("\n") { "v1.$it\tb1b2b3b\t2026-09-0${it % 10}" } + "\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = lines, stderr = "") }
+        val tags = (reader(fake).tags("/root/project") as ReadResult.Done).value
+        assertEquals(GitReader.TAG_CAP, tags.items.size)
+        assertEquals(45, tags.total)
+        assertEquals("v1.0", tags.items[0].name)
+    }
+
+    @Test
+    fun `graph execs the graph log and caps the page`() {
+        val stdout = "* a1b2c3d add x\n|\n* e4f5a6b fix y\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = stdout, stderr = "") }
+        val page = (reader(fake).graph("/root/project") as ReadResult.Done).value
+        assertEquals(
+            listOf("git", "-C", "/root/project", "log", "-n", "60", "--graph", "--pretty=format:%h%d %s"),
+            fake.argvs.single(),
+        )
+        assertEquals(3, page.lines.size)
+    }
+
+    @Test
+    fun `worktrees parse the porcelain blocks`() {
+        val stdout = "worktree /root/project\n" +
+            "HEAD a1b2c3da1b2c3da1b2c3da1b2c3da1b2c3da1b2c3d\n" +
+            "branch refs/heads/main\n" +
+            "\n" +
+            "worktree /root/wt-hotfix\n" +
+            "HEAD e4f5a6be4f5a6be4f5a6be4f5a6be4f5a6be4f5a6b\n" +
+            "branch refs/heads/hotfix\n" +
+            "\n" +
+            "worktree /root/bare.git\n" +
+            "bare\n"
+        val trees = parseWorktrees(stdout.lineSequence().toList(), cap = 12)
+        assertEquals(3, trees.size)
+        assertEquals("/root/project", trees[0].path)
+        assertEquals("main", trees[0].branch)
+        assertEquals("hotfix", trees[1].branch)
+        assertTrue(trees[2].bare)
+        assertNull(trees[2].branch)
+    }
+
+    @Test
+    fun `submodule rows parse status path and describe`() {
+        val stdout = " 12345678901234567890123456789012345678901 libs/old (v1.0)\n" +
+            "-0987654321098765432109876543210987654321 libs/new\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = stdout, stderr = "") }
+        val subs = (reader(fake).submodules("/root/project") as ReadResult.Done).value
+        assertEquals(2, subs.size)
+        assertTrue(subs[0].initialized)
+        assertEquals("libs/old", subs[0].path)
+        assertEquals("v1.0", subs[0].describe)
+        assertFalse(subs[1].initialized)
+        assertEquals("libs/new", subs[1].path)
+    }
+
+    @Test
+    fun `identity execs the one script and parses both keys`() {
+        val stdout = "@@NAME:Alice\n@@EMAIL:a@b.c\n"
+        val fake = FakeExec { ExecResult(exitCode = 0, stdout = stdout, stderr = "") }
+        val identity = (reader(fake).identity("/root/project") as ReadResult.Done).value
+        assertEquals(listOf("/bin/sh", "-c", GitReader.IDENTITY_SCRIPT, "sh", "/root/project"), fake.argvs.single())
+        assertEquals("Alice", identity.name)
+        assertEquals("a@b.c", identity.email)
+        assertTrue(identity.complete)
+    }
+
+    @Test
+    fun `sparse checkout failure is the honest not-using answer`() {
+        val fake = FakeExec { ExecResult(exitCode = 1, stdout = "", stderr = "fatal: this worktree is not sparse\n") }
+        val result = reader(fake).sparseCheckout("/root/project")
+        assertEquals("fatal: this worktree is not sparse", (result as ReadResult.Failed).reason)
     }
 
     // ----------------------------------------------------- failures

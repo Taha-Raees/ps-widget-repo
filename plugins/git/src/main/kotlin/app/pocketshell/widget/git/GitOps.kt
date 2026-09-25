@@ -177,6 +177,39 @@ internal sealed interface GitOp {
         override fun argv(repoPath: String) = base(repoPath, "tag", "-d", name)
     }
 
+    // ------------------------------------------------------------ worktrees
+
+    /** `git worktree add <path> [<branch>]` — a linked working tree. */
+    data class WorktreeAdd(val path: String, val branch: String? = null) : GitOp {
+        override val kind = "worktree-add"
+        override fun argv(repoPath: String): List<String> {
+            val argv = base(repoPath, "worktree", "add", path)
+            return if (branch.isNullOrBlank()) argv else argv + branch
+        }
+    }
+
+    /** `git worktree remove <path>` — git deletes that directory. */
+    data class WorktreeRemove(val path: String) : GitOp {
+        override val kind = "worktree-remove"
+        override val destructive = true
+        override fun argv(repoPath: String) = base(repoPath, "worktree", "remove", path)
+    }
+
+    // ---------------------------------------------------------- configuration
+
+    /**
+     * `git config <key> <value>` — ONLY the whitelisted identity keys a
+     * workstation needs to set; every other key stays terminal work.
+     */
+    data class ConfigSet(val key: String, val value: String) : GitOp {
+        override val kind = "config-set"
+        override fun argv(repoPath: String) = base(repoPath, "config", key, value)
+
+        companion object {
+            val ALLOWED_KEYS = setOf("user.name", "user.email")
+        }
+    }
+
     // ------------------------------------------------------------ branches
 
     /** `git switch <name>` — check out an existing branch (`git` refuses a dirty collision). */
@@ -453,6 +486,12 @@ internal object GitOps {
             body = "The tag reference is removed. Its commit stays; the name that pointed at it is gone.",
             confirmWord = "Delete tag",
         )
+        is GitOp.WorktreeRemove -> ConfirmSpec(
+            title = "Remove worktree \"${op.path}\"?",
+            body = "git deletes that directory. Uncommitted changes in it are lost — " +
+                "commit or stash them there first.",
+            confirmWord = "Remove",
+        )
         else -> null
     }
 
@@ -492,6 +531,15 @@ internal object GitOps {
         is GitOp.Reset -> revRefusal(op.ref)
         is GitOp.TagCreate -> refRefusal(op.name) ?: hashRefusalOrNull(op.hash)
         is GitOp.TagDelete -> refRefusal(op.name)
+        is GitOp.WorktreeAdd -> pathRefusal(op.path, allowAbsolute = true) ?: refRefusal(op.branch)
+        is GitOp.WorktreeRemove -> pathRefusal(op.path, allowAbsolute = true)
+        is GitOp.ConfigSet -> when {
+            op.key !in GitOp.ConfigSet.ALLOWED_KEYS ->
+                "\"${op.key}\" is not a key this app sets — use a terminal"
+            op.value.isBlank() -> "the value is empty"
+            op.value.contains('\u0000') -> "the value contains a NUL byte"
+            else -> null
+        }
         GitOp.StageAll, GitOp.DiscardTrackedAll, is GitOp.UnstageAll -> null
     }
 
@@ -654,6 +702,9 @@ internal object GitOps {
         is GitOp.CheckoutCommit -> "Check out"
         is GitOp.TagCreate -> "Tag"
         is GitOp.TagDelete -> "Delete tag"
+        is GitOp.WorktreeAdd -> "Add worktree"
+        is GitOp.WorktreeRemove -> "Remove worktree"
+        is GitOp.ConfigSet -> "Set"
     }
 
     /** What a running op says (present tense — the work really is in flight). */
@@ -684,6 +735,9 @@ internal object GitOps {
         is GitOp.CheckoutCommit -> "Checking out…"
         is GitOp.TagCreate -> "Tagging…"
         is GitOp.TagDelete -> "Deleting tag…"
+        is GitOp.WorktreeAdd -> "Adding worktree…"
+        is GitOp.WorktreeRemove -> "Removing worktree…"
+        is GitOp.ConfigSet -> "Setting…"
     }
 }
 

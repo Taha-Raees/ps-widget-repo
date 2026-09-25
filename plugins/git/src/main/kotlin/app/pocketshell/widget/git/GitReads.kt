@@ -104,6 +104,41 @@ internal data class CommitDetail(
 internal data class DiffText(val parsed: GitDiffParser.Parsed, val hidden: Int)
 
 
+/** A capped raw text page (blame, graph, LFS listings): git's own lines. */
+internal data class TextPage(val lines: List<String>, val hidden: Int)
+
+/** One `git reflog` entry: the abbreviated hash + git's reflog subject. */
+internal data class ReflogEntry(val hash: String, val subject: String)
+
+/** One tag from `git for-each-ref refs/tags`. */
+internal data class TagRow(val name: String, val hash: String, val date: String)
+
+/** One worktree from `git worktree list --porcelain`. */
+internal data class WorktreeRow(
+    val path: String,
+    val head: String?,
+    /** The checked-out branch; null when detached or bare. */
+    val branch: String?,
+    val bare: Boolean,
+    val detached: Boolean,
+)
+
+/** One submodule from `git submodule status --recursive`. */
+internal data class SubmoduleRow(
+    /** The status prefix: ' ' in sync, '-' not initialized, '+' differs, 'U' conflicts. */
+    val status: Char,
+    val path: String,
+    val describe: String,
+) {
+    val initialized: Boolean get() = status != '-'
+    val inSync: Boolean get() = status == ' '
+}
+
+/** The repository's configured identity (git config user.name / user.email). */
+internal data class Identity(val name: String?, val email: String?) {
+    val complete: Boolean get() = !name.isNullOrBlank() && !email.isNullOrBlank()
+}
+
 /** A capped list plus git's real total, so "N more" is always a fact. */
 internal data class Bounded<T>(val items: List<T>, val total: Int) {
     val hidden: Int get() = (total - items.size).coerceAtLeast(0)
@@ -200,6 +235,140 @@ internal class GitReader(
     }
 
 
+    // ------------------------------------------------- deep reads (M3)
+
+    /** One file's blame, capped — git's own `-l` lines, verbatim. */
+    fun blame(repoPath: String, path: String, maxLines: Int = TEXT_PAGE_MAX_LINES): ReadResult<TextPage> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf("git", "-C", repoPath, "blame", "-l", "--", path),
+    ) { stdout ->
+        val capped = GitPresentation.capLines(stdout.lineSequence().toList(), maxLines)
+        TextPage(lines = capped.lines, hidden = capped.hidden)
+    }
+
+    /** One file's history (`log -- <path>`), bounded like the History tab. */
+    fun fileHistory(repoPath: String, path: String, limit: Int): ReadResult<List<LogEntry>> {
+        val window = limit.coerceIn(1, MAX_HISTORY_WINDOW)
+        return read(
+            timeoutMs = READ_TIMEOUT_MS,
+            argv = listOf(
+                "git", "-C", repoPath, "log", "-n", window.toString(),
+                "--pretty=format:$LOG_FORMAT", "--", path,
+            ),
+        ) { stdout -> parseLogBlock(stdout.lineSequence().toList()) }
+    }
+
+    /** The repository's reflog, capped. */
+    fun reflog(repoPath: String, cap: Int = REFLOG_CAP): ReadResult<List<ReflogEntry>> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf("git", "-C", repoPath, "reflog", "-n", cap.toString(), "--format=$REFLOG_FORMAT"),
+    ) { stdout ->
+        parseSimpleRows(stdout.lineSequence().toList(), limit = cap) { fields ->
+            if (fields.size >= 2 && fields[0].isNotBlank()) {
+                ReflogEntry(hash = fields[0].trim(), subject = fields[1].trim())
+            } else {
+                null
+            }
+        }
+    }
+
+    /** The tags (`for-each-ref refs/tags`), capped with a total. */
+    fun tags(repoPath: String, cap: Int = TAG_CAP): ReadResult<Bounded<TagRow>> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf(
+            "git", "-C", repoPath, "for-each-ref", "refs/tags",
+            "--format=$TAG_FORMAT", "--sort=-creatordate",
+        ),
+    ) { stdout ->
+        val all = parseSimpleRows(stdout.lineSequence().toList(), limit = Int.MAX_VALUE) { fields ->
+            if (fields.size >= 3 && fields[0].isNotBlank()) {
+                TagRow(name = fields[0].trim(), hash = fields[1].trim(), date = fields[2].trim())
+            } else {
+                null
+            }
+        }
+        Bounded(items = all.take(cap), total = all.size)
+    }
+
+    /** The commit graph as git draws it (`log --graph`), capped. */
+    fun graph(repoPath: String, limit: Int = GRAPH_LIMIT): ReadResult<TextPage> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf(
+            "git", "-C", repoPath, "log", "-n", limit.toString(),
+            "--graph", "--pretty=format:%h%d %s",
+        ),
+    ) { stdout ->
+        val capped = GitPresentation.capLines(stdout.lineSequence().toList(), maxLines = limit * 3)
+        TextPage(lines = capped.lines, hidden = capped.hidden)
+    }
+
+    /** The worktrees (`worktree list --porcelain`). */
+    fun worktrees(repoPath: String, cap: Int = WORKTREE_CAP): ReadResult<List<WorktreeRow>> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf("git", "-C", repoPath, "worktree", "list", "--porcelain"),
+    ) { stdout -> parseWorktrees(stdout.lineSequence().toList(), cap) }
+
+    /** The submodules (`submodule status --recursive`). */
+    fun submodules(repoPath: String, cap: Int = SUBMODULE_CAP): ReadResult<List<SubmoduleRow>> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf("git", "-C", repoPath, "submodule", "status", "--recursive"),
+    ) { stdout ->
+        parseSimpleRows(stdout.lineSequence().toList(), limit = cap) { fields ->
+            // porcelain: one line " <42-char hash> <path> (<describe>)"; the
+            // 42 covers the status char git puts BEFORE the hash
+            val raw = fields[0]
+            if (raw.length < 42) {
+                null
+            } else {
+                val status = raw.first()
+                val rest = raw.substring(42).trim()
+                SubmoduleRow(
+                    status = if (status == 'U') 'U' else status,
+                    path = rest.substringBefore(' ').trim(),
+                    describe = rest.substringAfter(' ', "").trim('(', ')'),
+                )
+            }
+        }
+    }
+
+    /** The LFS-tracked files (`git lfs ls-files --size`), capped. */
+    fun lfsFiles(repoPath: String, maxLines: Int = TEXT_PAGE_MAX_LINES): ReadResult<TextPage> = read(
+        timeoutMs = FILES_TIMEOUT_MS,
+        argv = listOf("git", "-C", repoPath, "lfs", "ls-files", "--size"),
+    ) { stdout ->
+        val capped = GitPresentation.capLines(stdout.lineSequence().toList(), maxLines)
+        TextPage(lines = capped.lines, hidden = capped.hidden)
+    }
+
+    /**
+     * The sparse-checkout cone (`git sparse-checkout list`), capped. A
+     * repository not using sparse checkout fails here with git's own
+     * words — which IS the honest answer, not an error to hide.
+     */
+    fun sparseCheckout(repoPath: String, maxLines: Int = TEXT_PAGE_MAX_LINES): ReadResult<TextPage> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf("git", "-C", repoPath, "sparse-checkout", "list"),
+    ) { stdout ->
+        val capped = GitPresentation.capLines(stdout.lineSequence().toList(), maxLines)
+        TextPage(lines = capped.lines, hidden = capped.hidden)
+    }
+
+    /** The configured identity — one small script, two config keys. */
+    fun identity(repoPath: String): ReadResult<Identity> = read(
+        timeoutMs = READ_TIMEOUT_MS,
+        argv = listOf("/bin/sh", "-c", IDENTITY_SCRIPT, "sh", repoPath),
+    ) { stdout ->
+        var name: String? = null
+        var email: String? = null
+        for (line in stdout.lineSequence()) {
+            when {
+                line.startsWith(IDENTITY_NAME_PREFIX) -> name = line.removePrefix(IDENTITY_NAME_PREFIX).trim().ifEmpty { null }
+                line.startsWith(IDENTITY_EMAIL_PREFIX) -> email = line.removePrefix(IDENTITY_EMAIL_PREFIX).trim().ifEmpty { null }
+            }
+        }
+        Identity(name = name, email = email)
+    }
+
     /**
      * The one exec path every read shares: run the argv, then classify.
      * A dead guest ([ExecResult.error]) and a git failure (non-zero exit)
@@ -283,6 +452,43 @@ internal class GitReader(
          * and the rows can never disagree. A plain val (not const): the
          * escaped dollars keep the shell script's own variables literal.
          */
+        /** Reflog entries listed before the honest cap line. */
+        const val REFLOG_CAP = 20
+
+        /** Tags listed before the "+N more" line. */
+        const val TAG_CAP = 40
+
+        /** Graph commits rendered before the honest cap line. */
+        const val GRAPH_LIMIT = 60
+
+        /** Worktrees listed before the honest cap line. */
+        const val WORKTREE_CAP = 12
+
+        /** Submodules listed before the honest cap line. */
+        const val SUBMODULE_CAP = 40
+
+        /** Raw text pages (blame / graph / LFS) render this many lines. */
+        const val TEXT_PAGE_MAX_LINES = 400
+
+        /** The reflog record: the abbreviated hash, then git's subject. */
+        const val REFLOG_FORMAT = "%h\t%gs"
+
+        /** The tag record: name TAB abbreviated hash TAB creation date. */
+        const val TAG_FORMAT = "%(refname:short)\t%(objectname:short)\t%(creatordate:short)"
+
+        /** The identity script's markers. */
+        const val IDENTITY_NAME_PREFIX = "@@NAME:"
+        const val IDENTITY_EMAIL_PREFIX = "@@EMAIL:"
+
+        /**
+         * The two identity keys in ONE exec (a script, like [FILES_SCRIPT]):
+         * the repository path is a positional argument, never interpolated.
+         */
+        val IDENTITY_SCRIPT = """
+            echo "@@NAME:${'$'}(git -C "${'$'}1" config user.name 2>/dev/null)"
+            echo "@@EMAIL:${'$'}(git -C "${'$'}1" config user.email 2>/dev/null)"
+        """.trimIndent()
+
         val FILES_SCRIPT = """
             total=${'$'}(git -C "${'$'}1" ls-files 2>/dev/null | wc -l)
             echo "@@FILES:${'$'}total"
@@ -390,3 +596,65 @@ internal fun parseCommitFiles(lines: List<String>): List<CommitFile> {
 
 /** The field separator `%x1f` emits — a byte no ref name can contain. */
 internal const val FIELD_SEP = "\u001f"
+
+/**
+ * The row shape several refs reads share: split each line through the
+ * quote-aware splitter and map, skipping malformed rows rather than
+ * guessing them into data.
+ */
+private inline fun <T> parseSimpleRows(
+    lines: List<String>,
+    limit: Int,
+    map: (fields: List<String>) -> T?,
+): List<T> {
+    val out = mutableListOf<T>()
+    for (line in lines) {
+        if (out.size >= limit) break
+        if (line.isBlank()) continue
+        map(GitQuoted.splitTabFields(line, limit = 4))?.let { out += it }
+    }
+    return out
+}
+
+/**
+ * `git worktree list --porcelain`: blocks of `worktree <path>` /
+ * `HEAD <hash>` / `branch <ref>` / `bare` / `detached`. A path git printed
+ * is a path git vouched for — no re-derivation.
+ */
+internal fun parseWorktrees(lines: List<String>, cap: Int): List<WorktreeRow> {
+    val out = mutableListOf<WorktreeRow>()
+    var path: String? = null
+    var head: String? = null
+    var branch: String? = null
+    var bare = false
+    var detached = false
+
+    fun flush() {
+        val p = path
+        if (p != null && out.size < cap) {
+            out += WorktreeRow(
+                path = p,
+                head = head,
+                branch = branch?.removePrefix("refs/heads/"),
+                bare = bare,
+                detached = detached,
+            )
+        }
+        path = null; head = null; branch = null; bare = false; detached = false
+    }
+
+    for (line in lines) {
+        when {
+            line == "bare" -> bare = true
+            line == "detached" -> detached = true
+            line.startsWith("worktree ") -> {
+                flush()
+                path = line.removePrefix("worktree ")
+            }
+            line.startsWith("HEAD ") -> head = line.removePrefix("HEAD ")
+            line.startsWith("branch ") -> branch = line.removePrefix("branch ")
+        }
+    }
+    flush()
+    return out
+}

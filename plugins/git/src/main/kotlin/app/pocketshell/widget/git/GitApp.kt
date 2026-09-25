@@ -301,6 +301,7 @@ internal enum class RepoTab(val label: String) {
     BRANCHES("Branches"),
     FILES("Files"),
     REMOTES("Remotes"),
+    REPO("Repo"),
 }
 
 // ----------------------------------------------------------------- reads
@@ -347,6 +348,8 @@ internal data class HistoryReq(val repoPath: String, val window: Int, val serial
 internal data class CommitReq(val repoPath: String, val hash: String, val serial: Int)
 
 internal data class DiffReq(val repoPath: String, val target: DiffTarget, val serial: Int)
+
+internal data class FilePathReq(val repoPath: String, val path: String, val serial: Int)
 
 // ------------------------------------------------------------------- ops
 
@@ -419,13 +422,26 @@ internal class GitState(
         }
     }
 
-    // The on-demand read slots — one per screen need (M3 adds more).
+    // The on-demand read slots — one per screen need.
     val history = ReadSlot<HistoryReq, List<LogEntry>>()
     val remoteBranches = ReadSlot<RepoReq, Bounded<Branch>>()
     val stashes = ReadSlot<RepoReq, Bounded<StashEntry>>()
     val files = ReadSlot<RepoReq, FileList>()
     val commit = ReadSlot<CommitReq, CommitDetail>()
     val diff = ReadSlot<DiffReq, DiffText>()
+
+    // The deep reads (blame, a file's history, graph, reflog, tags,
+    // worktrees, submodules, LFS, sparse checkout, identity).
+    val blame = ReadSlot<FilePathReq, TextPage>()
+    val fileHistory = ReadSlot<FilePathReq, List<LogEntry>>()
+    val graph = ReadSlot<RepoReq, TextPage>()
+    val reflog = ReadSlot<RepoReq, List<ReflogEntry>>()
+    val tags = ReadSlot<RepoReq, Bounded<TagRow>>()
+    val worktrees = ReadSlot<RepoReq, List<WorktreeRow>>()
+    val submodules = ReadSlot<RepoReq, List<SubmoduleRow>>()
+    val lfs = ReadSlot<RepoReq, TextPage>()
+    val sparse = ReadSlot<RepoReq, TextPage>()
+    val identity = ReadSlot<RepoReq, Identity>()
 
     /**
      * The mutation epoch: every completed op bumps it, and every read slot
