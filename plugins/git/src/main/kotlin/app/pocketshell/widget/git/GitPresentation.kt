@@ -75,13 +75,115 @@ internal object GitPresentation {
     /** The worktree marker: ● changes pending, ○ clean. */
     fun worktreeGlyph(dirty: Boolean): Char = if (dirty) '●' else '○'
 
+    /**
+     * THE credential guard. A remote URL is shown to a human only through
+     * this function, which is what makes "never expose a password or token"
+     * a property of the code rather than a promise in a comment.
+     *
+     *   https://user:ghp_secret@github.com/u/r.git  →  https://REDACTED@github.com/u/r.git
+     *   user:secret@host:path                       →  ***@host:path
+     *   ssh://git@github.com/u/r.git                →  untouched (no secret)
+     *   git@github.com:u/r.git                      →  untouched (no secret)
+     *
+     * A bare userinfo on an http(s)/ftp(s) URL is redacted too: a token in
+     * the username position (`https://ghp_xxx@…`) is common and the UI
+     * cannot know it is not one. Anything that is not a URL at all — a local
+     * path, a relative one — passes through verbatim.
+     */
+    fun sanitizeUrl(url: String): String {
+        val trimmed = url.trim()
+        val schemeEnd = trimmed.indexOf("://")
+        if (schemeEnd > 0) {
+            val scheme = trimmed.substring(0, schemeEnd).lowercase()
+            val rest = trimmed.substring(schemeEnd + 3)
+            val at = rest.indexOf('@')
+            val slash = rest.indexOf('/')
+            if (at > 0 && (slash < 0 || at < slash)) {
+                val userinfo = rest.substring(0, at)
+                val hostPart = rest.substring(at + 1)
+                val keepUser = (scheme == "ssh" || scheme == "git") && !userinfo.contains(':')
+                return if (keepUser) {
+                    "$scheme://$userinfo@$hostPart"
+                } else {
+                    "$scheme://$REDACTED@$hostPart"
+                }
+            }
+            return trimmed
+        }
+        // scp form: [user[:password]@]host:path — only when the part before
+        // "@" is a user, not a local path that happens to contain one.
+        val at = trimmed.indexOf('@')
+        if (at > 0) {
+            val userinfo = trimmed.substring(0, at)
+            if (userinfo.contains(':') && !userinfo.contains('/')) {
+                return "$REDACTED@${trimmed.substring(at + 1)}"
+            }
+        }
+        return trimmed
+    }
+
+    /** The ONE way a remote URL reaches a screen: sanitized, then shortened. */
+    fun displayUrl(url: String): String = shortUrl(sanitizeUrl(url))
+
+    /**
+     * How old a reading is, in words. Shown next to every cached list so a
+     * stale answer can never masquerade as the current state.
+     */
+    fun ageLabel(nowMs: Long, thenMs: Long): String {
+        if (thenMs <= 0L) return "never"
+        val seconds = ((nowMs - thenMs).coerceAtLeast(0)) / 1000
+        return when {
+            seconds < 5 -> "just now"
+            seconds < 60 -> "${seconds}s ago"
+            seconds < 3600 -> "${seconds / 60}m ago"
+            seconds < 86_400 -> "${seconds / 3600}h ago"
+            else -> "${seconds / 86_400}d ago"
+        }
+    }
+
+    /**
+     * ONE letter for a dense row: the unmerged side wins, then the worktree
+     * side, then the index side, then untracked. (The porcelain XY pair stays
+     * available where both halves matter — the Changes tab shows both.)
+     */
+    fun statusLetter(entry: GitStatusParser.PorcelainEntry): Char = when {
+        entry.conflict -> 'U'
+        entry.untracked -> '?'
+        entry.y != ' ' -> entry.y
+        entry.x != ' ' -> entry.x
+        else -> '?'
+    }
+
+    /** path → dense letter, for the Files tab's dirty marks. */
+    fun statusByPath(entries: List<GitStatusParser.PorcelainEntry>): Map<String, Char> {
+        if (entries.isEmpty()) return emptyMap()
+        val out = HashMap<String, Char>(entries.size)
+        for (entry in entries) out[entry.path] = statusLetter(entry)
+        return out
+    }
+
+    /** "3 files" / "1 file" — a count a human reads without parsing. */
+    fun countLabel(count: Int, singular: String, plural: String = "${singular}s"): String =
+        "$count " + if (count == 1) singular else plural
+
+    /** A subject/path kept to ONE line: real newlines and tabs become visible. */
+    fun oneLine(text: String): String = buildString(text.length) {
+        for (c in text) {
+            when (c) {
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(c)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- display
+
+    /** What replaces a credential in any rendered URL. */
+    const val REDACTED = "***"
+
     // ------------------------------------------- bounded inspection pages
-
-    /** The commit page's stat list renders at most this many lines. */
-    const val COMMIT_STAT_MAX_LINES = 40
-
-    /** The diff page renders at most this many lines. */
-    const val DIFF_MAX_LINES = 400
 
     /** One rendered line keeps at most this many characters, ellipsised. */
     const val MAX_LINE_CHARS = 200

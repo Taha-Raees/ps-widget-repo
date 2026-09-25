@@ -54,13 +54,15 @@ internal data class GitSnapshot(
     val dirtyRepos: Int get() = repos.count { it.status?.dirty == true }
 }
 
-/** One commit of a repository's recent history (%h|%an|%ar|%s). */
+/** One commit of a repository's recent history (%h, %ar, %D, %an, %s). */
 internal data class LogEntry(
-    /** The abbreviated hash git printed (%h) — the commit page's key. */
+    /** The abbreviated hash git printed (%h) — the commit screen's key. */
     val hash: String,
     val author: String,
     val relativeTime: String,
     val subject: String,
+    /** The `%D` ref decoration ("HEAD -> main, origin/main"); null when none. */
+    val refs: String? = null,
 )
 
 /** One local branch, with its upstream tracking state kept raw + parsed. */
@@ -80,38 +82,21 @@ internal data class Branch(
 private val AHEAD_RE = Regex("""ahead (\d+)""")
 private val BEHIND_RE = Regex("""behind (\d+)""")
 
-/** One configured remote — the first URL git reports for the name. */
-internal data class Remote(val name: String, val url: String)
-
-/** One commit's `git show --stat` facts — the commit page's data. */
-internal data class CommitDetail(
-    /** The FULL hash (%H), distinct from the RECENT list's %h. */
-    val fullHash: String,
-    val author: String,
-    val email: String?,
-    val relativeDate: String,
-    val subject: String,
-    /** The --stat lines (path + insertions/deletions), already capped. */
-    val statLines: List<String>,
-    /** How many stat lines were cut by the cap — a real count, or zero. */
-    val hiddenStatLines: Int,
-)
-
-/** A working-tree or index diff, already capped for render. */
-internal data class DiffText(
-    val lines: List<String>,
-    /** How many lines were cut by the cap — a real count, or zero. */
-    val hidden: Int,
-)
-
-internal sealed interface CommitResult {
-    data class Done(val detail: CommitDetail) : CommitResult
-    data class Failed(val reason: String) : CommitResult
-}
-
-internal sealed interface DiffResult {
-    data class Done(val text: DiffText) : DiffResult
-    data class Failed(val reason: String) : DiffResult
+/**
+ * One configured remote. Git reports BOTH its URLs (`git remote -v` prints a
+ * fetch and a push line per remote) and they can differ — so both are kept,
+ * raw as git printed them. Credentials are never rendered: the UI passes
+ * every URL through [GitPresentation.sanitizeUrl] before it reaches a pixel.
+ */
+internal data class Remote(
+    val name: String,
+    /** The fetch URL git reports for this name; null when git printed none. */
+    val fetchUrl: String?,
+    /** The push URL; equal to [fetchUrl] unless the remote pushes elsewhere. */
+    val pushUrl: String?,
+) {
+    /** True when this remote pushes somewhere other than it fetches. */
+    val pushUrlDiffers: Boolean = pushUrl != null && pushUrl != fetchUrl
 }
 
 internal sealed interface ScanResult {
@@ -146,7 +131,7 @@ internal class GitProbe(
 
     private val lock = Any()
     private var hasScanned = false
-    private var lastScanAtMs: Long = 0L
+    private var lastScanAt = 0L
     private var lastSnapshot: GitSnapshot? = null
 
     /**
@@ -169,7 +154,7 @@ internal class GitProbe(
      */
     fun snapshot(): ScanResult = synchronized(lock) {
         hasScanned = true
-        lastScanAtMs = clock()
+        lastScanAt = clock()
         val result: ScanResult = try {
             val out = exec.exec(
                 listOf("/bin/sh", "-c", PROBE_SCRIPT, "sh"),
@@ -198,66 +183,14 @@ internal class GitProbe(
     }
 
     /**
-     * M8.4.3 — the commit page: ONE bounded, read-only `git show --stat`
-     * for one commit. One tap = one exec; the result carries the tool's
-     * real stderr tail on failure. The hash must be bare hex (our own %h
-     * output) — anything else is refused BEFORE any exec (Sync's
-     * option-injection discipline: no guest text becomes an option).
+     * Forces the next tick to scan. Used after a mutation (the only way the
+     * UI may show new state is git answering again) and by the manual
+     * refresh control.
      */
-    fun showCommit(repoPath: String, hash: String): CommitResult {
-        if (!COMMIT_HASH_RE.matches(hash)) return CommitResult.Failed("not a commit hash: $hash")
-        return try {
-            val out = exec.exec(
-                listOf(
-                    "git", "-C", repoPath,
-                    "show", "--stat",
-                    "--pretty=format:%H%n%an <%ae>%n%ar%n%s",
-                    hash,
-                ),
-                MANUAL_TIMEOUT_MS,
-            )
-            when {
-                out.error != null -> CommitResult.Failed(out.error!!)
-                out.exitCode != 0 -> CommitResult.Failed(
-                    stderrTail(out) ?: "git exited with ${out.exitCode}",
-                )
-                else -> parseShowOutput(out.stdout)?.let { CommitResult.Done(it) }
-                    ?: CommitResult.Failed("unrecognized git show output")
-            }
-        } catch (t: Throwable) {
-            CommitResult.Failed(t.message ?: t.javaClass.simpleName)
-        }
-    }
+    fun invalidate() = synchronized(lock) { hasScanned = false }
 
-    /**
-     * M8.4.3 — the diff page: ONE bounded, read-only `git diff` for one
-     * path — `--cached` for the index side of a change, plain for the
-     * worktree side. The path rides as a direct argv element after "--"
-     * (execve bytes, never reparsed — nothing to escape).
-     */
-    fun diffFile(repoPath: String, path: String, staged: Boolean): DiffResult = try {
-        val argv = if (staged) {
-            listOf("git", "-C", repoPath, "diff", "--cached", "--", path)
-        } else {
-            listOf("git", "-C", repoPath, "diff", "--", path)
-        }
-        val out = exec.exec(argv, MANUAL_TIMEOUT_MS)
-        when {
-            out.error != null -> DiffResult.Failed(out.error!!)
-            out.exitCode != 0 -> DiffResult.Failed(
-                stderrTail(out) ?: "git exited with ${out.exitCode}",
-            )
-            else -> {
-                val capped = GitPresentation.capLines(
-                    out.stdout.lineSequence().toList(),
-                    GitPresentation.DIFF_MAX_LINES,
-                )
-                DiffResult.Done(DiffText(lines = capped.lines, hidden = capped.hidden))
-            }
-        }
-    } catch (t: Throwable) {
-        DiffResult.Failed(t.message ?: t.javaClass.simpleName)
-    }
+    /** When the last scan finished (for the honest "scanned Ns ago" line). */
+    val lastScanAtMs: Long get() = synchronized(lock) { lastScanAt }
 
     private fun stderrTail(out: ExecResult): String? =
         out.stderr.lineSequence().lastOrNull { it.isNotBlank() }
@@ -295,16 +228,10 @@ internal class GitProbe(
         /** Minimum space between full guest execs on an open, watched card. */
         const val AUTO_RESCAN_MS = 20_000L
 
-        /** The manual inspection execs are single git calls — cheap, bounded. */
-        const val MANUAL_TIMEOUT_MS = 15_000L
-
-        /** A bare hex object name — our own %h output, never guest text. */
-        private val COMMIT_HASH_RE = Regex("""[0-9a-fA-F]{4,40}""")
-
         /** Protocol caps — MUST match the script's own bounds (-5, head -n). */
         const val LOG_MAX_ENTRIES = 5
-        const val BRANCH_MAX_ENTRIES = 12
-        const val REMOTE_MAX_ENTRIES = 6
+        const val BRANCH_MAX_ENTRIES = 24
+        const val REMOTE_MAX_ENTRIES = 10
 
         /** The lone "$" — the probe script is a shell script, not a template. */
         private const val D = "$"
@@ -321,19 +248,23 @@ internal class GitProbe(
          *   3. per repo — `git status --porcelain=v1 -b` (stable, script-
          *      documented format), its exit code after every block so one
          *      unreadable repository degrades alone;
-         *   4. per repo — last 5 commits (`git log -5`, pipe-separated
-         *      fields), local branches (`git branch --format`, capped at
-         *      12 via head) and remotes (`git remote -v`, capped at 12 raw
-         *      lines = 6 remotes at 2 lines each) — every section bounded,
-         *      every failure silenced into an empty section;
+         *   4. per repo — last 5 commits, local branches (`git branch
+         *      --format`, head -n 24) and remotes (`git remote -v`, head
+         *      -n 20 = 10 remotes at 2 lines each) — every section bounded,
+         *      every failure silenced into an empty section. Deeper reads
+         *      (history windows, remote branches, stashes, the file index,
+         *      commit detail, diffs) are NOT here: they happen on demand,
+         *      per screen, in GitReader;
          *   5. terminal `exit 0` — a completed scan is a successful probe
          *      no matter what git printed (the v0.4.4 mixed-answer lesson).
          *
          * `sort` gives a deterministic repo order; the pipeline's while
          * loop keeps the whole thing ONE exec (discovery, status, history
          * and refs share the same proot spawn). The format strings are
-         * single-quoted: a bare "|" inside a word is a shell pipe, so the
-         * separators can never ride unquoted.
+         * single-quoted; the LOG separator is `%x1f` (a byte a ref name can
+         * never contain, so the refs field cannot be ambiguous) and the
+         * BRANCH separator is a TAB for the same reason — ref-filter does
+         * not support `%x1f`, but it does honour `\t`.
          */
         val PROBE_SCRIPT = """
             command -v git >/dev/null 2>&1 || { echo "@@GIT:"; exit 0; }
@@ -347,11 +278,11 @@ internal class GitProbe(
               git -C "${D}d" status --porcelain=v1 -b 2>/dev/null
               echo "@@RC:${D}?"
               echo "@@LOG"
-              git -C "${D}d" log -5 --pretty=format:'%h|%an|%ar|%s' 2>/dev/null && echo ""
+              git -C "${D}d" log -5 --pretty=format:'%h%x1f%ar%x1f%D%x1f%an%x1f%s' 2>/dev/null && echo ""
               echo "@@BRANCHES"
-              git -C "${D}d" branch --format='%(refname:short)|%(upstream:short)|%(upstream:track)' 2>/dev/null | head -n 12
+              git -C "${D}d" branch --format='%(refname:short)\t%(upstream:short)\t%(upstream:track)' 2>/dev/null | head -n 24
               echo "@@REMOTES"
-              git -C "${D}d" remote -v 2>/dev/null | head -n 12
+              git -C "${D}d" remote -v 2>/dev/null | head -n 20
             done
             echo "@@DONE"
             exit 0
@@ -368,9 +299,9 @@ internal data class RepoBlock(
     val lines: List<String>,
     /** git's exit code; null when the block was cut short (truncated exec). */
     val rc: Int?,
-    /** Raw @@LOG lines (hash|author|time|subject), verbatim. */
+    /** Raw @@LOG lines (hash ␟ date ␟ refs ␟ author ␟ subject), verbatim. */
     val logLines: List<String> = emptyList(),
-    /** Raw @@BRANCHES lines (name|upstream|track), verbatim. */
+    /** Raw @@BRANCHES lines (name TAB upstream TAB track), verbatim. */
     val branchLines: List<String> = emptyList(),
     /** Raw @@REMOTES lines (git remote -v), verbatim. */
     val remoteLines: List<String> = emptyList(),
@@ -460,88 +391,78 @@ internal fun parseProbeOutput(stdout: String): ProbeOutput? {
 }
 
 /**
- * The @@LOG block: `hash|author|relative-time|subject` — the split is
- * capped at 4 fields so a subject containing "|" stays one field, and at
- * [GitProbe.LOG_MAX_ENTRIES] entries (the script's `log -5` is the first
- * bound; this is the defensive second). Malformed lines are skipped,
- * never guessed into commits.
+ * The @@LOG block: `hash ␟ relative-time ␟ refs ␟ author ␟ subject` (0x1f is
+ * [FIELD_SEP]). The free-text fields come LAST and the split is capped so a
+ * subject containing the separator — or a raw `|` — stays one field. A
+ * control byte can never appear in a ref name, which is what makes the refs
+ * field unambiguous. Malformed lines are skipped, never guessed into commits.
  */
 internal fun parseLogBlock(lines: List<String>): List<LogEntry> =
     lines.asSequence()
         .filter { it.isNotBlank() }
-        .map { it.split('|', limit = 4) }
-        .filter { it.size == 4 && it[0].isNotBlank() }
-        .map { LogEntry(it[0].trim(), it[1].trim(), it[2].trim(), it[3]) }
-        .take(GitProbe.LOG_MAX_ENTRIES)
+        .map { it.split(FIELD_SEP, limit = 5) }
+        .filter { it.size == 5 && it[0].isNotBlank() }
+        .map {
+            LogEntry(
+                hash = it[0].trim(),
+                relativeTime = it[1].trim(),
+                refs = it[2].trim().ifEmpty { null },
+                author = it[3].trim(),
+                subject = it[4],
+            )
+        }
         .toList()
 
 /**
- * The @@BRANCHES block: `name|upstream|track` (refnames cannot contain
- * "|", so the split is unambiguous). An empty upstream parses to null;
- * the track string is kept raw and parsed into ahead/behind/gone.
+ * The @@BRANCHES block: `name TAB upstream TAB track`. A TAB is the
+ * separator because git's ref-filter honours it and a control character
+ * cannot appear in a ref name — the shipped 2.0.0 parser used "|", which a
+ * branch name may legally contain (verified: `git branch 'a|b'` succeeds),
+ * so this is a protocol fix, not a cosmetic one. An empty upstream parses to
+ * null; the track string is kept raw and parsed into ahead/behind/gone.
  */
 internal fun parseBranchBlock(lines: List<String>): List<Branch> =
     lines.asSequence()
         .filter { it.isNotBlank() }
-        .map { it.split('|', limit = 3) }
+        .map { it.split('\t', limit = 3) }
         .filter { it.size == 3 && it[0].isNotBlank() }
         .map { Branch(it[0].trim(), it[1].trim().ifEmpty { null }, it[2].trim()) }
-        .take(GitProbe.BRANCH_MAX_ENTRIES)
         .toList()
 
 /**
- * The @@REMOTES block: `git remote -v`'s "name<TAB>url (fetch|push)"
- * lines — the fetch URL wins, and a name seen once is never replaced
- * (first URL per name). Two lines per remote is why the script caps the
- * raw output at 12 lines for [GitProbe.REMOTE_MAX_ENTRIES] remotes.
+ * The @@REMOTES block: `git remote -v`'s "name<TAB>url (fetch|push)" lines.
+ * BOTH URLs are kept — a remote may push somewhere other than it fetches
+ * (the pushed-to URL is often the one carrying credentials, which is exactly
+ * why the UI sanitises it before rendering). The fetch line wins for
+ * [Remote.fetchUrl]; a name git printed once keeps that side and leaves the
+ * other null rather than being dropped.
  */
 internal fun parseRemoteBlock(lines: List<String>): List<Remote> {
-    val firstUrlByName = LinkedHashMap<String, String>()
+    val fetchByName = LinkedHashMap<String, String?>()
+    val pushByName = LinkedHashMap<String, String?>()
     for (line in lines) {
         if (line.isBlank()) continue
-        val parts = line.trim().split(Regex("""\s+"""))
-        if (parts.size < 2) continue
-        if (parts.size >= 3 && parts[2] == "(push)") continue
-        if (!firstUrlByName.containsKey(parts[0])) firstUrlByName[parts[0]] = parts[1]
+        val tab = line.indexOf('\t')
+        if (tab <= 0) continue
+        val name = line.substring(0, tab).trim()
+        val rest = line.substring(tab + 1).trim()
+        val isPush = rest.endsWith("(push)")
+        val isFetch = rest.endsWith("(fetch)")
+        val url = when {
+            isPush -> rest.removeSuffix("(push)").trim()
+            isFetch -> rest.removeSuffix("(fetch)").trim()
+            else -> rest
+        }
+        when {
+            isPush && !pushByName.containsKey(name) -> pushByName[name] = url
+            !isPush && !fetchByName.containsKey(name) -> fetchByName[name] = url
+        }
     }
-    return firstUrlByName.entries.take(GitProbe.REMOTE_MAX_ENTRIES)
-        .map { Remote(name = it.key, url = it.value) }
-}
-
-/**
- * `git show --stat --pretty=format:%H%n%an <%ae>%n%ar%n%s` output: four
- * header lines by position (full hash, author, relative date, subject)
- * followed by the --stat block (blank separator lines dropped, capped for
- * render by [GitPresentation.capLines]). Null when the protocol cannot
- * vouch for the shape — a Failed result, never invented facts.
- */
-internal fun parseShowOutput(raw: String): CommitDetail? {
-    val lines = raw.lineSequence().toList()
-    if (lines.size < 4) return null
-    val fullHash = lines[0].trim()
-    if (!SHOW_HASH_RE.matches(fullHash)) return null
-    val authorLine = lines[1].trim()
-    val lt = authorLine.indexOf(" <")
-    val author = if (lt > 0) authorLine.substring(0, lt).trim() else authorLine
-    val email = if (lt > 0) {
-        authorLine.substring(lt + 2).removeSuffix(">").trim().ifEmpty { null }
-    } else {
-        null
+    val names = (fetchByName.keys + pushByName.keys).toList().take(GitProbe.REMOTE_MAX_ENTRIES)
+    return names.map { name ->
+        Remote(name = name, fetchUrl = fetchByName[name], pushUrl = pushByName[name])
     }
-    val statRaw = lines.drop(4).filter { it.isNotBlank() }
-    val capped = GitPresentation.capLines(statRaw, GitPresentation.COMMIT_STAT_MAX_LINES)
-    return CommitDetail(
-        fullHash = fullHash,
-        author = author,
-        email = email,
-        relativeDate = lines[2].trim(),
-        subject = lines[3],
-        statLines = capped.lines,
-        hiddenStatLines = capped.hidden,
-    )
 }
-
-private val SHOW_HASH_RE = Regex("""[0-9a-fA-F]{7,40}""")
 
 /**
  * Guest paths for humans: the guest home (where discovery looks) shows as

@@ -12,29 +12,30 @@ import java.io.File
  * The GIT application's structural contract (source-reading pins in the
  * established HomeWidgetContractTest style — the JVM suite has no device
  * runner, so boundaries are pinned by reading what ships). Scope: the
- * widget/git sources only; shared files belong to the shared contract.
+ * widget/git sources only.
  *
  * Pinned here:
- *   1. THEME INDEPENDENCE: only the shared PocketShell tokens — no
+ *   1. THEME INDEPENDENCE: every UI file reads the shared tokens — no
  *      hardcoded colors, no theme-name literals, no canvas-tone text pair.
- *   2. THE GUEST EXEC PATH: probing goes ONLY through the sanctioned
- *      non-PTY launch spec + background runner; no own-hand process-table
- *      reading, no direct process spawning.
- *   3. READ-ONLY GIT: the probe script carries exactly the read commands;
- *      no state-changing git verb can ever reach the guest from this card.
- *   4. IN-CARD NAVIGATION: the application owns its detail state and its
- *      own back handler; actions ride the one WidgetNav seam.
- *   5. The probe/parser/presentation layer stays pure (no android deps).
- *   6. M8.4.2 STATE OWNERSHIP: the probe + screen state live in the
- *      process-scoped store, and the refresh control is a named icon.
+ *   2. THE GUEST EXEC PATH: the exec closure lives ONLY in GitApp and
+ *      rides the sanctioned non-PTY launch spec + background runner; no
+ *      own-hand process-table reading, no direct process spawning.
+ *   3. THE READ-ONLY PROBE: the dashboard script carries exactly the read
+ *      commands, bounded in the script itself.
+ *   4. THE MUTATION SEAM: write verbs exist as exec'd argv ONLY in
+ *      GitOps.kt; the UI cannot exec, and every op runs through the
+ *      runner (re-validated) followed by a forced rescan + read bump.
+ *   5. IN-CARD NAVIGATION: the stack lives in the process-scoped store;
+ *      back pops the innermost screen; actions ride the one WidgetNav seam.
+ *   6. PURITY: the probe/parser/rules layer has no android dependencies.
+ *   7. STATE OWNERSHIP: stateStore.forApp; the resume edge is cache-first
+ *      and gate-governed; refresh is a named icon; reads are gen-guarded.
  */
 class GitAppContractTest {
 
     // ------------------------------------------------------------ helpers
 
     private fun gitSource(relative: String): String {
-        // The sources live in THIS module now (M8.5): the unit-test working
-        // directory is the module dir; the second form covers repo-root runs.
         val file = listOf(
             "src/main/kotlin/app/pocketshell/widget/git/$relative",
             "plugins/git/src/main/kotlin/app/pocketshell/widget/git/$relative",
@@ -42,6 +43,14 @@ class GitAppContractTest {
         assumeTrue("source not found on this runner: $relative", file != null)
         return file!!.readText()
     }
+
+    private fun uiSources(): List<Pair<String, String>> =
+        listOf("GitApp.kt", "GitComponents.kt", "GitScreens.kt", "GitDetails.kt")
+            .map { it to gitSource(it) }
+
+    private fun ruleSources(): List<String> =
+        listOf("GitProbe.kt", "GitStatusParser.kt", "GitPresentation.kt", "GitReads.kt",
+            "GitOps.kt", "GitFiles.kt", "GitDiffParser.kt", "GitQuoted.kt", "GitLayout.kt")
 
     /** Comments + string CONTENTS stripped — structural tokens only. */
     private fun stripCommentsAndStrings(source: String): String {
@@ -78,17 +87,24 @@ class GitAppContractTest {
         val literals = mutableListOf<String>()
         var i = 0
         while (i < source.length) {
-            if (source[i] == '"') {
-                val start = i + 1
-                var j = start
-                while (j < source.length && source[j] != '"') {
-                    if (source[j] == '\\') j++
-                    j++
+            when {
+                source[i] == '/' && i + 1 < source.length && source[i + 1] == '*' -> {
+                    i = source.indexOf("*/", i + 2).let { if (it < 0) source.length else it + 2 }
                 }
-                literals += source.substring(start, j.coerceAtMost(source.length))
-                i = j + 1
-            } else {
-                i++
+                source[i] == '/' && i + 1 < source.length && source[i + 1] == '/' -> {
+                    while (i < source.length && source[i] != '\n') i++
+                }
+                source[i] == '"' -> {
+                    val start = i
+                    i++
+                    while (i < source.length && source[i] != '"') {
+                        if (source[i] == '\\') i++
+                        i++
+                    }
+                    i++
+                    literals += source.substring(start + 1, i - 1)
+                }
+                else -> i++
             }
         }
         return literals
@@ -97,66 +113,69 @@ class GitAppContractTest {
     // -------------------------------------- 1. theme independence
 
     @Test
-    fun `the Git application follows the shared theme - no private theme`() {
-        val app = gitSource("GitApp.kt")
-        val code = stripCommentsAndStrings(app)
-        assertTrue("must read the shared tokens", code.contains("HomeTokens."))
-        assertTrue("must read the theme typeface", code.contains("TerminalTheme."))
-        assertFalse(
-            "no canvas-tone text pair (the card is a chrome-surface citizen)",
-            code.contains("onHero"),
-        )
-        assertFalse(
-            "no hardcoded colors — the selected theme is the only palette",
-            Regex("""Color\(0x""").containsMatchIn(code),
-        )
-        assertFalse(
-            "no theme-name literals (Aurora is ONE theme, never a dependency)",
-            stringLiterals(app).any { it.contains("Aurora", ignoreCase = true) },
-        )
-        assertFalse(
-            "no hardcoded colors in the probe layer either",
-            Regex("""Color\(0x""").containsMatchIn(stripCommentsAndStrings(gitSource("GitProbe.kt"))),
-        )
+    fun `every UI file follows the shared theme - no private theme`() {
+        // Tokens are read COLLECTIVELY (GitApp is the wiring object; the
+        // composables carry the pixels) — the banned things are per-file.
+        val allCode = uiSources().joinToString("\n") { stripCommentsAndStrings(it.second) }
+        assertTrue("the UI must read the shared tokens", allCode.contains("HomeTokens."))
+        assertTrue("the UI must read the theme typeface", allCode.contains("TerminalTheme."))
+        uiSources().forEach { (name, source) ->
+            val code = stripCommentsAndStrings(source)
+            assertFalse(
+                "$name: no canvas-tone text pair (the card is a chrome-surface citizen)",
+                code.contains("onHero"),
+            )
+            assertFalse(
+                "$name: no hardcoded colors — the selected theme is the only palette",
+                Regex("""Color\(0x""").containsMatchIn(code),
+            )
+            assertFalse(
+                "$name: no theme-name literals (Aurora is ONE theme, never a dependency)",
+                stringLiterals(source).any { it.contains("Aurora", ignoreCase = true) },
+            )
+        }
+        (ruleSources() + "GitPlugin.kt").forEach { name ->
+            assertFalse(
+                "$name: no hardcoded colors in the rules layer either",
+                Regex("""Color\(0x""").containsMatchIn(stripCommentsAndStrings(gitSource(name))),
+            )
+        }
     }
 
     // -------------------------------------- 2. the guest exec path
 
     @Test
-    fun `probing goes only through the sanctioned non-PTY guest exec`() {
+    fun `the exec closure lives only in GitApp on the sanctioned guest path`() {
         val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
         assertTrue(
             "specs must come from the ONE launch builder",
             app.contains("RuntimeProcessLauncher.buildLaunchSpec"),
         )
         assertTrue(
-            "the minimal device-proven profile is the probe's mount configuration",
+            "the minimal device-proven profile is the exec's mount configuration",
             app.contains("GuestExecutionProfile.PACKAGE_OPERATION"),
         )
         assertTrue(
             "execution rides the shared background guest runner",
             app.contains("ProcessBuilderGuestCommandRunner"),
         )
-        listOf("GitApp.kt", "GitProbe.kt", "GitStatusParser.kt").forEach { name ->
+        // No other file in the module builds a launch spec or spawns anything.
+        (ruleSources() + listOf("GitScreens.kt", "GitDetails.kt", "GitComponents.kt")).forEach { name ->
             val code = stripCommentsAndStrings(gitSource(name))
             val banned = listOf(
                 "/proc", "cmdline", "Runtime.getRuntime", "java.lang.ProcessBuilder",
-                "Runtime.exec", "libproot",
+                "Runtime.exec", "libproot", "buildLaunchSpec", "ProcessBuilderGuestCommandRunner",
             )
             val found = banned.filter { code.contains(it) }
-            assertTrue(
-                "$name must stay on the guest exec path only; found: $found",
-                found.isEmpty(),
-            )
+            assertTrue("$name must stay off the exec path; found: $found", found.isEmpty())
         }
     }
 
-    // -------------------------------------- 3. read-only git
+    // -------------------------------------- 3. the read-only probe
 
     /**
-     * The probe script is a Kotlin RAW string (triple-quoted), which the
-     * single-quote literal scanner cannot extract — locate it by its
-     * markers instead.
+     * The probe script is a Kotlin RAW string, which the literal scanner
+     * cannot extract — locate it by its markers instead.
      */
     private fun probeScriptLiteral(): String? {
         val source = gitSource("GitProbe.kt")
@@ -183,115 +202,98 @@ class GitAppContractTest {
             "status is the stable porcelain form (asked per discovered repo)",
             script.contains("status --porcelain=v1 -b"),
         )
-        // M8.4.3 inspection sections — read-only listing verbs, bounded.
         assertTrue("recent history is a bounded log", script.contains("log -5"))
         assertTrue("branches are listed read-only", script.contains("branch --format"))
         assertTrue("remotes are listed read-only", script.contains("remote -v"))
+        // exactly two head-capped listings: branches (24) and remotes (20)
         assertTrue(
             "branch and remote listings are head-capped in the script",
-            Regex("head -n 12").findAll(script).count() == 2,
+            Regex("head -n \\d+").findAll(script).count() == 2,
         )
         val banned = listOf(
             " add", " rm ", "commit", "push", "pull", "merge", "rebase",
             "checkout", "reset", "stash", "clean", "clone", "init", "config", " mv ",
         )
         val found = banned.filter { script.contains(it) }
-        assertTrue("the card never mutates a repository; found: $found", found.isEmpty())
+        assertTrue("the dashboard probe never mutates a repository; found: $found", found.isEmpty())
     }
 
-    /**
-     * M8.4.3 — the manual commit/diff pages exec OUTSIDE the probe script,
-     * as direct argv (no shell). Their argv lists are pinned literally:
-     * exactly two read-only git verbs may ever leave this card by hand.
-     */
+    // -------------------------------------- 4. the mutation seam
+
     @Test
-    fun `the manual inspection execs are read-only verbs with pinned argv`() {
-        val literals = stringLiterals(gitSource("GitProbe.kt"))
+    fun `write verbs are exec'd only through GitOps argv lists`() {
+        // GitOps.kt must name its verbs as argv elements...
+        val opsLiterals = stringLiterals(gitSource("GitOps.kt"))
+        listOf("add", "commit", "merge", "rebase", "reset", "revert", "cherry-pick", "tag", "stash")
+            .forEach { verb ->
+                assertTrue("GitOps.kt must define \"$verb\"", verb in opsLiterals)
+            }
+        // ...and the READ layers must never exec one.
+        listOf("GitProbe.kt", "GitReads.kt").forEach { name ->
+            val literals = stringLiterals(gitSource(name))
+            val bannedVerbs = setOf(
+                "add", "commit", "push", "pull", "merge", "rebase", "checkout",
+                "reset", "clean", "clone", "init", "apply", "rm", "mv", "tag", "pop", "drop",
+            )
+            val found = literals.filter { it in bannedVerbs }
+            assertTrue("$name execs read verbs only; found: $found", found.isEmpty())
+        }
+        // The UI cannot exec anything: no argv lists, no exec calls.
+        listOf("GitScreens.kt", "GitDetails.kt", "GitComponents.kt").forEach { name ->
+            val code = stripCommentsAndStrings(gitSource(name))
+            assertFalse("$name must not build argv lists", code.contains("listOf(\"git\""))
+            assertFalse("$name must not call exec", Regex("""\.exec\(""").containsMatchIn(code))
+        }
+    }
+
+    @Test
+    fun `every mutation is followed by a forced rescan and a read bump`() {
+        val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
+        assertTrue("the op rides the runner", app.contains("state.ops.run("))
         assertTrue(
-            "the commit page asks for show --stat with the four-line header format",
-            literals.contains("show") &&
-                literals.contains("--stat") &&
-                literals.contains("--pretty=format:%H%n%an <%ae>%n%ar%n%s"),
+            "the probe is invalidated after every op",
+            app.contains("state.probe.invalidate()"),
         )
         assertTrue(
-            "the diff page asks for git diff with an explicit -- separator",
-            literals.contains("diff") && literals.contains("--") && literals.contains("--cached"),
+            "the read epoch bumps after every op - deeper screens re-read",
+            app.contains("state.readEpoch++"),
         )
-        val bannedVerbs = setOf(
-            "add", "rm", "mv", "commit", "push", "pull", "merge", "rebase",
-            "checkout", "reset", "stash", "clean", "clone", "init", "config",
-        )
-        val found = literals.filter { it in bannedVerbs }
         assertTrue(
-            "no state-changing git verb may appear as an argv element; found: $found",
-            found.isEmpty(),
+            "the rescan follows the op in the same effect",
+            Regex(
+                """state\.ui = scanToUi\(withContext\(Dispatchers\.IO\) \{ state\.probe\.snapshot\(\) \}\)""",
+            ).containsMatchIn(app),
         )
     }
 
-    // -------------------------------------- 4. in-card navigation
+    // -------------------------------------- 5. in-card navigation
 
     @Test
-    fun `the application owns its detail state and its own back`() {
-        val code = stripCommentsAndStrings(gitSource("GitApp.kt"))
+    fun `the application owns its stack and its own back`() {
+        val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
         assertTrue(
-            "detail + selection state must live in the process-scoped store (M8.4.2)",
-            code.contains("stateStore.forApp"),
+            "state must live in the process-scoped store",
+            app.contains("stateStore.forApp"),
         )
         assertTrue(
-            "back inside the card closes the innermost inspection page before " +
-                "the detail page, and only the overview's back leaves Home",
-            code.contains(
-                "BackHandler(enabled = selected != null || state.commitReq != null || state.diffReq != null)",
-            ),
+            "back pops the innermost screen; only an empty stack reaches Home",
+            app.contains("BackHandler(enabled = state.stack.isNotEmpty())"),
         )
-        // Actions ride ONLY the one navigation seam.
-        assertTrue(code.contains("nav.openTerminal()"))
-        assertTrue(code.contains("nav.openLinuxShell()"))
-        assertTrue(code.contains("nav.openDiagnostics()"))
+        assertTrue(app.contains("nav.openTerminal()"))
+        assertTrue(app.contains("nav.openLinuxShell()"))
+        assertTrue(app.contains("nav.openDiagnostics()"))
         val banned = listOf("startActivity", "Intent(")
-        val found = banned.filter { code.contains(it) }
+        val found = banned.filter { app.contains(it) }
         assertTrue("no second navigation mechanism; found: $found", found.isEmpty())
     }
 
-    /**
-     * M8.4.3 — the commit/diff pages are MANUAL execs outside the probe's
-     * idle gate: one tap = one bounded exec, served from the last-viewed
-     * cache when the target is unchanged, and a result may only land while
-     * its request is still the newest (the serial guard) — a stale guest
-     * answer abandoned by navigation can never overwrite the page.
-     */
-    @Test
-    fun `manual inspection is one tap one exec and guarded against stale results`() {
-        val code = stripCommentsAndStrings(gitSource("GitApp.kt"))
-        assertTrue(
-            "the commit exec rides the probe's manual show path",
-            code.contains("state.probe.showCommit"),
-        )
-        assertTrue(
-            "the diff exec rides the probe's manual diff path",
-            code.contains("state.probe.diffFile"),
-        )
-        assertTrue(
-            "results land only under the request serial guard",
-            Regex("""state\.reqSerial == gen""").containsMatchIn(code),
-        )
-        assertTrue(
-            "the last-viewed commit cache gates re-exec on back-and-return",
-            code.contains("state.commitServed") && code.contains("state.diffServed"),
-        )
-        assertTrue(
-            "leaving a page abandons any in-flight exec's write-back",
-            code.contains("fun closeCommit") && code.contains("fun closeDiff"),
-        )
-    }
-
-    // -------------------------------------- 5. the probe layer stays pure
+    // -------------------------------------- 6. the rules layer stays pure
 
     @Test
-    fun `the probe and parser layers have no android dependencies`() {
-        listOf("GitProbe.kt", "GitStatusParser.kt", "GitPresentation.kt").forEach { name ->
+    fun `the probe parser and rules layers have no android dependencies`() {
+        ruleSources().forEach { name ->
             val code = stripCommentsAndStrings(gitSource(name))
-            val banned = listOf("android.", "androidx", "Context", "Composable")
+            val banned = listOf("android.", "androidx")
             val found = banned.filter { code.contains(it) }
             assertTrue("$name must stay JVM-pure; found: $found", found.isEmpty())
         }
@@ -302,16 +304,16 @@ class GitAppContractTest {
         )
     }
 
-    // ------------------- 6. M8.4.2 state ownership + the named refresh
+    // -------------------- 7. state ownership + the named refresh
 
     @Test
     fun `state comes from the process-scoped store and refresh is a named icon`() {
-        val code = stripCommentsAndStrings(gitSource("GitApp.kt"))
+        val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
         assertTrue(
             "the probe and screen state must live in the shared store",
-            code.contains("stateStore.forApp"),
+            app.contains("stateStore.forApp"),
         )
-        val literals = stringLiterals(gitSource("GitApp.kt"))
+        val literals = stringLiterals(gitSource("GitComponents.kt"))
         assertTrue(
             "the refresh icon needs its accessibility name for BOTH " +
                 "contentDescription and onClickLabel",
@@ -321,17 +323,30 @@ class GitAppContractTest {
 
     @Test
     fun `returning to the card renders the cache and gates any rescan`() {
-        val code = stripCommentsAndStrings(gitSource("GitApp.kt"))
+        val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
         assertTrue(
             "the resume edge must check for a cached Ready snapshot before scanning",
-            code.contains("val hasCache = state.ui is GitUi.Ready"),
+            app.contains("val hasCache = state.ui is GitUi.Ready"),
         )
         assertTrue(
             "the resume edge scan must be gated by the SAME staleness gate " +
                 "as the tick loop (no guest exec on every re-entry)",
             Regex(
                 """if \(!hasCache \|\| state\.probe\.shouldFullScan\(System\.currentTimeMillis\(\)\)\)""",
-            ).containsMatchIn(code),
+            ).containsMatchIn(app),
+        )
+    }
+
+    @Test
+    fun `reads are serial-guarded - a superseded exec can never land`() {
+        val components = stripCommentsAndStrings(gitSource("GitComponents.kt"))
+        assertTrue(
+            "the read effect captures the slot generation before its exec",
+            components.contains("val gen = slot.gen"),
+        )
+        assertTrue(
+            "the result lands only while its generation is current",
+            components.contains("if (slot.gen == gen)"),
         )
     }
 }

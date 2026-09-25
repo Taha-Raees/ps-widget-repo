@@ -18,6 +18,9 @@ import org.junit.Test
  */
 class GitProbeTest {
 
+    /** The %x1f field separator the probe's log format emits. */
+    private val SEP = "\u001f"
+
     // --------------------------------------------------------- fixtures
 
     private val fullOutput = """
@@ -28,12 +31,12 @@ class GitProbeTest {
         ?? notes.txt
         @@RC:0
         @@LOG
-        a1b2c3d|Alice Author|2 days ago|Add the thing
-        e4f5a6b|Bob|3 hours ago|Fix the pipe | in subjects
+        a1b2c3d${SEP}2 days ago${SEP}HEAD -> main${SEP}Alice Author${SEP}Add the thing
+        e4f5a6b${SEP}3 hours ago${SEP}${SEP}Bob${SEP}Fix the pipe | in subjects
         @@BRANCHES
-        main|origin/main|[ahead 1, behind 2]
-        dev||
-        topic|origin/topic|[gone]
+        main${'\t'}origin/main${'\t'}[ahead 1, behind 2]
+        dev${'\t'}${'\t'}
+        topic${'\t'}origin/topic${'\t'}[gone]
         @@REMOTES
         origin${'\t'}https://github.com/user/repo.git (fetch)
         origin${'\t'}https://github.com/user/repo.git (push)
@@ -41,7 +44,7 @@ class GitProbeTest {
         @@REPO:/root/broken
         @@RC:128
         @@LOG
-        deadbee|Ghost|1 week ago|Written before the repo broke
+        deadbee${SEP}1 week ago${SEP}${SEP}Ghost${SEP}Written before the repo broke
         @@DONE
     """.trimIndent() + "\n"
 
@@ -83,11 +86,18 @@ class GitProbeTest {
         val parsed = parseProbeOutput(fullOutput)!!
         val project = parsed.repos[0]
         assertEquals(
-            listOf("a1b2c3d|Alice Author|2 days ago|Add the thing", "e4f5a6b|Bob|3 hours ago|Fix the pipe | in subjects"),
+            listOf(
+                "a1b2c3d${SEP}2 days ago${SEP}HEAD -> main${SEP}Alice Author${SEP}Add the thing",
+                "e4f5a6b${SEP}3 hours ago${SEP}${SEP}Bob${SEP}Fix the pipe | in subjects",
+            ),
             project.logLines,
         )
         assertEquals(
-            listOf("main|origin/main|[ahead 1, behind 2]", "dev||", "topic|origin/topic|[gone]"),
+            listOf(
+                "main${'\t'}origin/main${'\t'}[ahead 1, behind 2]",
+                "dev${'\t'}${'\t'}",
+                "topic${'\t'}origin/topic${'\t'}[gone]",
+            ),
             project.branchLines,
         )
         assertEquals(
@@ -132,7 +142,7 @@ class GitProbeTest {
     @Test
     fun `stray lines between RC and the first section marker are dropped - not data`() {
         val parsed = parseProbeOutput(
-            "@@GIT:2.34.1\n@@REPO:/root/x\n## main\n@@RC:0\ngarbage line\n@@LOG\na1b2c3d|A|now|S\n@@DONE\n",
+            "@@GIT:2.34.1\n@@REPO:/root/x\n## main\n@@RC:0\ngarbage line\n@@LOG\na1b2c3d${SEP}now${SEP}${SEP}A${SEP}S\n@@DONE\n",
         )
         assertNotNull(parsed)
         assertTrue(parsed!!.repos.single().lines.all { it.startsWith("##") })
@@ -142,29 +152,31 @@ class GitProbeTest {
     // ------------------------------------------------ block parsing
 
     @Test
-    fun `the log block keeps a pipe inside the subject as one field`() {
+    fun `the log block keeps a separator inside the subject as one field`() {
         val log = parseLogBlock(
             listOf(
-                "a1b2c3d|Alice|2 days ago|Add the thing",
-                "e4f5a6b|Bob|3 hours ago|Fix: a | b | c",
-                "1111111|Cara|now|",
+                "a1b2c3d${SEP}2 days ago${SEP}HEAD -> main${SEP}Alice${SEP}Add the thing",
+                "e4f5a6b${SEP}3 hours ago${SEP}${SEP}Bob${SEP}Fix: a ${SEP}b | c",
+                "1111111${SEP}now${SEP}${SEP}Cara${SEP}",
             ),
         )
         assertEquals(3, log.size)
         assertEquals("a1b2c3d", log[0].hash)
         assertEquals("Alice", log[0].author)
         assertEquals("2 days ago", log[0].relativeTime)
+        assertEquals("HEAD -> main", log[0].refs)
         assertEquals("Add the thing", log[0].subject)
-        assertEquals("Fix: a | b | c", log[1].subject)
+        assertEquals("Fix: a ${SEP}b | c", log[1].subject)
+        assertNull(log[1].refs)
         assertEquals("", log[2].subject) // an empty subject is honest, not malformed
     }
 
     @Test
-    fun `malformed log lines are skipped and the block caps at five`() {
-        val lines = mutableListOf("no pipes here", "a|b|c", "ok01234|A|1 day ago|Real")
-        repeat(7) { i -> lines += "capped0$i|A|now|Filler $i" }
+    fun `malformed log lines are skipped - the script owns the bound`() {
+        val lines = mutableListOf("no separator here", "a${SEP}b", "ok01234${SEP}1 day ago${SEP}${SEP}A${SEP}Real")
+        repeat(7) { i -> lines += "capped0$i${SEP}now${SEP}${SEP}A${SEP}Filler $i" }
         val log = parseLogBlock(lines)
-        assertEquals(GitProbe.LOG_MAX_ENTRIES, log.size)
+        assertEquals(8, log.size) // every well-formed row parses; no parser-side cap
         assertEquals("ok01234", log[0].hash)
         assertEquals("Real", log[0].subject)
         assertEquals("capped00", log[1].hash)
@@ -174,10 +186,10 @@ class GitProbeTest {
     fun `the branch block parses upstream and tracking state`() {
         val branches = parseBranchBlock(
             listOf(
-                "main|origin/main|[ahead 2, behind 1]",
-                "dev||",
-                "topic|origin/topic|[gone]",
-                "local-only| |", // whitespace around an empty upstream still parses to null
+                "main${'\t'}origin/main${'\t'}[ahead 2, behind 1]",
+                "dev${'\t'}${'\t'}",
+                "topic${'\t'}origin/topic${'\t'}[gone]",
+                "local-only${'\t'} ${'\t'}", // whitespace around an empty upstream still parses to null
             ),
         )
         assertEquals(4, branches.size)
@@ -196,11 +208,11 @@ class GitProbeTest {
     }
 
     @Test
-    fun `the branch block caps at twelve and skips malformed lines`() {
-        val lines = mutableListOf("junk line without pipes")
-        repeat(15) { i -> lines += "branch-$i|origin/branch-$i|[ahead 1]" }
+    fun `the branch block parses every well-formed row - the script owns the bound`() {
+        val lines = mutableListOf("junk line without tabs")
+        repeat(15) { i -> lines += "branch-$i${'\t'}origin/branch-$i${'\t'}[ahead 1]" }
         val branches = parseBranchBlock(lines)
-        assertEquals(GitProbe.BRANCH_MAX_ENTRIES, branches.size)
+        assertEquals(15, branches.size)
         assertEquals("branch-0", branches[0].name)
     }
 
@@ -216,15 +228,19 @@ class GitProbeTest {
         )
         assertEquals(2, remotes.size)
         assertEquals("origin", remotes[0].name)
-        assertEquals("https://github.com/user/repo.git", remotes[0].url)
+        assertEquals("https://github.com/user/repo.git", remotes[0].fetchUrl)
+        assertEquals("https://elsewhere.org/user/repo.git", remotes[0].pushUrl)
+        assertTrue(remotes[0].pushUrlDiffers)
         assertEquals("fork", remotes[1].name)
-        assertEquals("git@github.com:other/repo.git", remotes[1].url)
+        assertEquals("git@github.com:other/repo.git", remotes[1].fetchUrl)
+        assertNull(remotes[1].pushUrl)
+        assertFalse(remotes[1].pushUrlDiffers)
     }
 
     @Test
-    fun `the remote block caps at six remotes and skips junk lines`() {
+    fun `the remote block caps at the probe bound and skips junk lines`() {
         val lines = mutableListOf("just-a-name-no-url")
-        repeat(8) { i ->
+        repeat(12) { i ->
             lines += "remote-$i\thttps://host-$i/repo.git (fetch)"
             lines += "remote-$i\thttps://host-$i/repo.git (push)"
         }
@@ -333,124 +349,6 @@ class GitProbeTest {
         val probe = GitProbe(FakeExec { throw IllegalStateException("proot missing") })
         val result = probe.snapshot()
         assertEquals("proot missing", (result as ScanResult.Failed).reason)
-    }
-
-    // --------------------------------------------- manual show / diff
-
-    private val showOutput = """
-        a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0
-        Alice Author <alice@example.com>
-        2 days ago
-        Add the thing
-
-         src/Main.kt | 4 ++--
-         src/Other.kt | 2 +-
-         2 files changed, 3 insertions(+), 3 deletions(-)
-    """.trimIndent() + "\n"
-
-    @Test
-    fun `showCommit execs the pinned read-only argv and parses the header block`() {
-        val fake = FakeExec { ExecResult(exitCode = 0, stdout = showOutput, stderr = "") }
-        val result = GitProbe(fake).showCommit("/root/project", "a1b2c3d")
-        val detail = (result as CommitResult.Done).detail
-        assertEquals(
-            listOf(
-                "git", "-C", "/root/project",
-                "show", "--stat",
-                "--pretty=format:%H%n%an <%ae>%n%ar%n%s",
-                "a1b2c3d",
-            ),
-            fake.argvs.single(),
-        )
-        assertEquals(GitProbe.MANUAL_TIMEOUT_MS, fake.timeouts.single())
-        assertEquals("a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0", detail.fullHash)
-        assertEquals("Alice Author", detail.author)
-        assertEquals("alice@example.com", detail.email)
-        assertEquals("2 days ago", detail.relativeDate)
-        assertEquals("Add the thing", detail.subject)
-        assertEquals(3, detail.statLines.size)
-        assertEquals(0, detail.hiddenStatLines)
-        assertTrue(detail.statLines.single { it.contains("Main.kt") }.contains("4 ++--"))
-    }
-
-    @Test
-    fun `showCommit caps the stat list with an honest hidden count`() {
-        val stats = (1..45).joinToString("\n") { " file-$it.kt | 1 +" }
-        val raw = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\nA <a@b.c>\nnow\nSubject\n\n$stats\n"
-        val detail = parseShowOutput(raw)!!
-        assertEquals(GitPresentation.COMMIT_STAT_MAX_LINES, detail.statLines.size)
-        assertEquals(5, detail.hiddenStatLines)
-    }
-
-    @Test
-    fun `a non-hex hash is refused before any exec`() {
-        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "", stderr = "") }
-        val result = GitProbe(fake).showCommit("/root/project", "-rm -rf /")
-        assertTrue(result is CommitResult.Failed)
-        assertEquals(0, fake.calls) // nothing reached the guest
-    }
-
-    @Test
-    fun `a failed show carries the tool's real stderr tail`() {
-        val fake = FakeExec { ExecResult(exitCode = 128, stdout = "", stderr = "fatal: bad object a1b2c3d\n") }
-        val result = GitProbe(fake).showCommit("/root/project", "a1b2c3d")
-        assertEquals("fatal: bad object a1b2c3d", (result as CommitResult.Failed).reason)
-    }
-
-    @Test
-    fun `unrecognizable show output is a failure - never invented facts`() {
-        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "not a show block\n", stderr = "") }
-        val result = GitProbe(fake).showCommit("/root/project", "a1b2c3d")
-        assertTrue((result as CommitResult.Failed).reason.contains("unrecognized"))
-    }
-
-    @Test
-    fun `diffFile execs the worktree diff argv for an unstaged side`() {
-        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "@@ -1 +1 @@\n-old\n+new\n", stderr = "") }
-        val result = GitProbe(fake).diffFile("/root/project", "src/a.kt", staged = false)
-        assertEquals(
-            listOf("git", "-C", "/root/project", "diff", "--", "src/a.kt"),
-            fake.argvs.single(),
-        )
-        val text = (result as DiffResult.Done).text
-        assertEquals(3, text.lines.size)
-        assertEquals(0, text.hidden)
-    }
-
-    @Test
-    fun `diffFile execs the cached diff argv for a staged side`() {
-        val fake = FakeExec { ExecResult(exitCode = 0, stdout = "+line\n", stderr = "") }
-        val result = GitProbe(fake).diffFile("/root/project", "src/a.kt", staged = true)
-        assertEquals(
-            listOf("git", "-C", "/root/project", "diff", "--cached", "--", "src/a.kt"),
-            fake.argvs.single(),
-        )
-        assertTrue(result is DiffResult.Done)
-    }
-
-    @Test
-    fun `a diff caps at four hundred lines and two hundred characters`() {
-        val long = "x".repeat(300)
-        val stdout = (1..405).joinToString("\n") { i -> if (i == 7) long else "line $i" } + "\n"
-        val fake = FakeExec { ExecResult(exitCode = 0, stdout = stdout, stderr = "") }
-        val text = (GitProbe(fake).diffFile("/root/project", "f.kt", staged = false) as DiffResult.Done).text
-        assertEquals(GitPresentation.DIFF_MAX_LINES, text.lines.size)
-        assertEquals(5, text.hidden)
-        assertEquals("x".repeat(GitPresentation.MAX_LINE_CHARS) + "…", text.lines[6])
-    }
-
-    @Test
-    fun `a failed diff carries the tool's real stderr tail`() {
-        val fake = FakeExec { ExecResult(exitCode = 128, stdout = "", stderr = "fatal: not a git repository\n") }
-        val result = GitProbe(fake).diffFile("/root/project", "f.kt", staged = false)
-        assertEquals("fatal: not a git repository", (result as DiffResult.Failed).reason)
-    }
-
-    @Test
-    fun `a thrown manual exec degrades to a failure, never a crash`() {
-        val fake = FakeExec { throw IllegalStateException("guest gone") }
-        val result = GitProbe(fake).diffFile("/root/project", "f.kt", staged = true)
-        assertEquals("guest gone", (result as DiffResult.Failed).reason)
     }
 
     // ------------------------------------------------------- idle gate
