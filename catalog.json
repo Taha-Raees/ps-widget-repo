@@ -3,11 +3,16 @@
     {
       "id": "servers",
       "name": "Servers",
-      "summary": "Dev servers in the Linux guest — verified live endpoints",
+      "summary": "Dev servers in the Linux guest — live endpoints, HTTP checks, process facts, system health",
       "author": "PocketShell",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "minAppVersion": "0.13.0",
-      "file": "widgets/servers.json"
+      "file": "widgets/servers.json",
+      "plugin": {
+        "className": "app.pocketshell.widget.servers.ServersPlugin",
+        "dex": "releases/servers/2.0.0/plugin.jar",
+        "sha256": "920ef56dd78fed0207457fd02a13fde779e8af0aeb9d5fec58067b730466589e"
+      }
     },
     {
       "id": "ssh",

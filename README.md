@@ -43,14 +43,27 @@ tools/validate-catalog.py    validate catalog.json (CI gate)
 
 | id | entry class | version | sources |
 |----|-------------|---------|---------|
-| `git` | `app.pocketshell.widget.git.GitPlugin` | 3.1.0 | `plugins/git/` |
+| `git` | `app.pocketshell.widget.git.GitPlugin` | 3.1.1 | `plugins/git/` |
 | `sync` | `app.pocketshell.widget.sync.SyncPlugin` | 2.0.0 | `plugins/sync/` |
+| `servers` | `app.pocketshell.widget.servers.ServersPlugin` | 2.0.0 | `plugins/servers/` |
 | `hello` | `repo.hello.HelloPlugin` | 1.0.0 | `plugins/hello/` (minimal shape — start new plugins here) |
 
 Each module has its own README. The plugins compile against the checked-in
 host API jar (`api/pocketshell-api.jar`, provenance + refresh
 procedure in `api/PROVENANCE.md`) and the same Compose stack the host ships
 — none of that is dexed into the artifacts.
+
+The `servers` plugin is the manifest→plugin graduation (like git and sync
+before it): the v1 `widgets/servers.json` six-line listener card becomes
+the full server monitor. The card tiers stay glance-only (status, verified
+rows, and on a roomy card each endpoint's HTTP chip + response-beat
+strip); the MAXIMIZED page is the desktop-class monitor — device health
+strip (load / memory / uptime / rootfs disk), search + sort, per-endpoint
+HTTP status + latency with a session beat history, process facts (PID /
+CPU% / RSS / argv / cwd), copy-URL, TERMINAL / COMPANION hand-off, and the
+confirm-gated STOP (`kill <pid>`, SIGTERM, the plugin's only guest exec).
+No endpoint is ever shown that the host's connect-verify pipeline did not
+answer.
 
 ## Canonical workflow (verified)
 
@@ -66,8 +79,8 @@ build-tools `36.1.0` (what the app itself builds with).
 ### Build + test
 
 ```bash
-./gradlew :plugins:hello:assembleDebug :plugins:git:assembleDebug :plugins:sync:assembleDebug
-./gradlew :plugins:git:testDebugUnitTest :plugins:sync:testDebugUnitTest
+./gradlew :plugins:hello:assembleDebug :plugins:git:assembleDebug :plugins:sync:assembleDebug :plugins:servers:assembleDebug
+./gradlew :plugins:git:testDebugUnitTest :plugins:sync:testDebugUnitTest :plugins:servers:testDebugUnitTest
 ```
 
 ### Publish (build + dex + release + catalog pin)
@@ -139,7 +152,7 @@ unit tests on every push/PR.
 Plugin versions are INDEPENDENT of the PocketShell app version:
 
 - PocketShell app: `0.14.0-m8.5` (the host)
-- Git plugin: `3.0.0` · Sync plugin: `2.0.0` · Hello plugin: `1.0.0`
+- Git plugin: `3.1.1` · Sync plugin: `2.0.0` · Servers plugin: `2.0.0` · Hello plugin: `1.0.0`
 
 PocketShell compares the catalog entry's `version` against the installed
 plugin's version (semver, compared major→minor→patch). A newer catalog

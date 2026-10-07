@@ -9,3 +9,6 @@ local.properties
 
 # OS
 .DS_Store
+
+# Kotlin 2.x build sessions
+.kotlin/

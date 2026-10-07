@@ -22,3 +22,4 @@ rootProject.name = "ps-widget-repo"
 include(":plugins:git")
 include(":plugins:sync")
 include(":plugins:hello")
+include(":plugins:servers")
