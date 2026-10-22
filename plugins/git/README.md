@@ -11,15 +11,21 @@ SHA-256 and loads with `DexClassLoader`.
 |---|---|
 | Catalog id | `git` |
 | Entry class | `app.pocketshell.widget.git.GitPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.3.1` |
+| Current version | `3.4.0` |
 | Namespace | `app.pocketshell.widget.git` |
 | Source of truth | THIS directory |
 
 ## What it does
 
-- **Dashboard** (the minimized card): every repository under the guest
-  home at a glance — branch, ahead/behind, dirty dot, one batched
-  read-only probe, idle-gated.
+- **Mini card**: a flat at-a-glance list — one ruled row per repository with a state
+  dot (filled = uncommitted changes, ring = clean / commits to push or pull, red =
+  unreadable), repositories that need attention first, rows sized to the card's height,
+  a footer like `9 repos · 2 dirty · ↑47 to push · +6 more`, and a thin indeterminate
+  rule while a scan runs. A tap opens that repository's in-card detail (one Back away).
+- **Home stays smooth**: the probe (dozens of guest `git` processes) runs ONLY while the
+  card is actually on screen (window-bounds test, so a pager page or a scrolled-away
+  card stops it), at low priority (`renice`), at most every 45 s; a manual refresh and
+  every mutation still rescan immediately. Every scan shows a loading indicator.
 - **Git Studio** (the maximized page, `GitStudio.kt`): a full-screen app shell in
   the app's flat style (hairlines, no cards) — a summary strip, one ruled row
   per repository (state rule: accent = changes, danger = unreadable), an app
@@ -79,6 +85,6 @@ workstation (3.1.0 supersedes a parallel 3.0.0 build).
 
 ```bash
 ./gradlew :plugins:git:assembleDebug :plugins:git:testDebugUnitTest
-tools/build-plugin.sh git 3.3.1               # build + dex to releases/git/3.3.1/plugin.jar
+tools/build-plugin.sh git 3.4.0               # build + dex to releases/git/3.4.0/plugin.jar
 tools/build-plugin.sh git 3.0.1 --update-catalog   # publish a new version + pin sha256 in catalog.json
 ```

@@ -165,6 +165,7 @@ internal fun StudioHome(
     ui: GitUi,
     repos: List<RepoSnapshot>,
     lastScanAtMs: Long,
+    scanning: Boolean,
     onRefresh: () -> Unit,
     onOpenWorkspace: (RepoSnapshot) -> Unit,
     onOpenTerminal: () -> Unit,
@@ -186,13 +187,14 @@ internal fun StudioHome(
                     )
                     val facts = listOfNotNull(
                         ready?.snapshot?.gitVersion?.let { "git $it" },
-                        if (repos.isNotEmpty()) "scanned ${GitPresentation.ageLabel(System.currentTimeMillis(), lastScanAtMs)}" else null,
+                        if (scanning) "scanning…" else if (repos.isNotEmpty()) "scanned ${GitPresentation.ageLabel(System.currentTimeMillis(), lastScanAtMs)}" else null,
                     )
                     if (facts.isNotEmpty()) MonoText(text = facts.joinToString(" · "), color = HomeTokens.textDim, fontSize = 10.sp)
                 }
                 StudioIconButton(Icons.Outlined.Terminal, "Open terminal", onClick = onOpenTerminal)
-                StudioIconButton(Icons.Outlined.Refresh, "Refresh repositories", onClick = onRefresh)
+                StudioIconButton(Icons.Outlined.Refresh, "Refresh repositories", enabled = !scanning, onClick = onRefresh)
             }
+            LoadingRule(active = scanning)
 
             if (repos.isNotEmpty()) {
                 val ahead = repos.sumOf { it.status?.ahead ?: 0 }
@@ -379,8 +381,8 @@ internal fun StudioWorkspace(
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val rail = GitLayout.usesSideRail(maxWidth.value)
         Column(modifier = Modifier.fillMaxSize()) {
-            StudioTopBar(repo, onBack, onRefresh = { state.refreshTick++ }, onOpenTerminal = onOpenTerminal)
-            Hairline()
+            StudioTopBar(repo, onBack, scanning = state.scanning, onRefresh = { if (!state.scanning) state.refreshTick++ }, onOpenTerminal = onOpenTerminal)
+            LoadingRule(active = state.scanning)
             Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (rail) {
                     StudioRail(tab, onTab)
@@ -409,7 +411,7 @@ internal fun StudioWorkspace(
 }
 
 @Composable
-private fun StudioTopBar(repo: RepoSnapshot, onBack: () -> Unit, onRefresh: () -> Unit, onOpenTerminal: () -> Unit) {
+private fun StudioTopBar(repo: RepoSnapshot, onBack: () -> Unit, scanning: Boolean, onRefresh: () -> Unit, onOpenTerminal: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         StudioIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back to repositories", onClick = onBack)
         Column(modifier = Modifier.weight(1f).padding(start = 4.dp, bottom = 4.dp)) {
@@ -430,7 +432,7 @@ private fun StudioTopBar(repo: RepoSnapshot, onBack: () -> Unit, onRefresh: () -
             }
         }
         StudioIconButton(Icons.Outlined.Terminal, "Open terminal", onClick = onOpenTerminal)
-        StudioIconButton(Icons.Outlined.Refresh, "Refresh repositories", onClick = onRefresh)
+        StudioIconButton(Icons.Outlined.Refresh, "Refresh repositories", enabled = !scanning, onClick = onRefresh)
     }
 }
 

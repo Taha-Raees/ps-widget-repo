@@ -226,7 +226,7 @@ internal class GitProbe(
         const val TICK_MS = 5_000L
 
         /** Minimum space between full guest execs on an open, watched card. */
-        const val AUTO_RESCAN_MS = 20_000L
+        const val AUTO_RESCAN_MS = 45_000L
 
         /** Protocol caps — MUST match the script's own bounds (-5, head -n). */
         const val LOG_MAX_ENTRIES = 5
@@ -267,6 +267,7 @@ internal class GitProbe(
          * not support `%x1f`, but it does honour `\t`.
          */
         val PROBE_SCRIPT = """
+            renice -n 15 -p "${D}${D}" >/dev/null 2>&1
             command -v git >/dev/null 2>&1 || { echo "@@GIT:"; exit 0; }
             echo "@@GIT:${D}(git --version 2>/dev/null | cut -d ' ' -f3)"
             for root in "${D}HOME" "${D}HOME/Projects"; do

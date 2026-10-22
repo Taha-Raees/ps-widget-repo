@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -92,6 +93,11 @@ object GitApp : HomeApplication() {
         }
         val lifecycleOwner = LocalLifecycleOwner.current
 
+        // Is the card actually showing? Home keeps several applications composed
+        // side by side, so "resumed" is not "visible" — the probe (dozens of guest
+        // git processes) must not run while the user is on another page.
+        val onScreen = remember { mutableStateOf(false) }
+
         // The dashboard's one batched read: a lifecycle-aware tick whose
         // ONLY cost is deciding — the probe's idle gate turns a tick that
         // fires too soon into nothing at all (no guest exec while idle).
@@ -105,26 +111,33 @@ object GitApp : HomeApplication() {
                 .distinctUntilChanged()
                 .collectLatest { active ->
                     if (!active) return@collectLatest
-                    // Re-entry execs NOTHING on top of a usable cache: the
-                    // SAME staleness policy as the tick loop decides. Only
-                    // a cache-less ui (Probing, a failed probe — hasCache
-                    // false) or a cache older than the idle gate re-scans.
-                    val hasCache = state.ui is GitUi.Ready
-                    if (!hasCache || state.probe.shouldFullScan(System.currentTimeMillis())) {
-                        state.ui = scanToUi(withContext(Dispatchers.IO) { state.probe.snapshot() })
-                    }
-                    while (true) {
-                        delay(GitProbe.TICK_MS)
-                        if (!state.probe.shouldFullScan(System.currentTimeMillis())) continue
-                        state.ui = scanToUi(withContext(Dispatchers.IO) { state.probe.snapshot() })
-                    }
+                    // Only while the card is on screen: paging or scrolling away
+                    // cancels the loop (and any tick), coming back restarts it.
+                    snapshotFlow { onScreen.value }
+                        .distinctUntilChanged()
+                        .collectLatest { shown ->
+                            if (!shown) return@collectLatest
+                            // Re-entry execs NOTHING on top of a usable cache: the
+                            // SAME staleness policy as the tick loop decides. Only
+                            // a cache-less ui (Probing, a failed probe — hasCache
+                            // false) or a cache older than the idle gate re-scans.
+                            val hasCache = state.ui is GitUi.Ready
+                            if (!hasCache || state.probe.shouldFullScan(System.currentTimeMillis())) {
+                                state.rescan()
+                            }
+                            while (true) {
+                                delay(GitProbe.TICK_MS)
+                                if (!state.probe.shouldFullScan(System.currentTimeMillis())) continue
+                                state.rescan()
+                            }
+                        }
                 }
         }
 
         // The manual refresh control: one scan, outside the gate.
         LaunchedEffect(state.refreshTick) {
             if (state.refreshTick == 0 || context.runtimeState != RuntimeState.READY) return@LaunchedEffect
-            state.ui = scanToUi(withContext(Dispatchers.IO) { state.probe.snapshot() })
+            state.rescan()
         }
 
         // THE mutation path: one op at a time, run to completion, then a
@@ -149,17 +162,21 @@ object GitApp : HomeApplication() {
                 state.probe.invalidate()
                 state.readEpoch++
             }
-            state.ui = scanToUi(withContext(Dispatchers.IO) { state.probe.snapshot() })
+            state.rescan()
         }
 
         // The application owns its back: the stack's innermost screen pops
         // first; only from the dashboard does back reach the rest of Home.
         BackHandler(enabled = state.stack.isNotEmpty()) { state.back() }
 
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().trackOnScreen(onScreen)) {
             val layout = GitLayout.from(maxWidth.value, maxHeight.value)
             val repos = (state.ui as? GitUi.Ready)?.snapshot?.repos.orEmpty()
             state.retain(repos)
+            // The mini card's repository detail owns Back before the card does.
+            BackHandler(enabled = state.miniDetail != null && state.stack.isEmpty() && !layout.isWorkspace) {
+                state.miniDetail = null
+            }
 
             // Any pending confirm renders above everything; nothing runs
             // until it is answered.
@@ -183,19 +200,22 @@ object GitApp : HomeApplication() {
                         ui = state.ui,
                         repos = repos,
                         lastScanAtMs = state.probe.lastScanAtMs,
-                        onRefresh = { state.refreshTick++ },
+                        scanning = state.scanning,
+                        onRefresh = { if (!state.scanning) state.refreshTick++ },
                         onOpenWorkspace = { repo -> state.open(Screen.Workspace(repo.path)) },
                         onOpenTerminal = { context.nav.openTerminal() },
                         onOpenLinuxShell = { context.nav.openLinuxShell() },
                         onOpenDiagnostics = { context.nav.openDiagnostics() },
-                    ) else GitDashboard(
+                    ) else GitMiniCard(
                         ui = state.ui,
                         repos = repos,
                         layout = layout,
-                        selectedPath = state.selectedPath,
+                        scanning = state.scanning,
+                        detailPath = state.miniDetail,
                         lastScanAtMs = state.probe.lastScanAtMs,
-                        onRefresh = { state.refreshTick++ },
-                        onSelectRepo = { state.selectedPath = it },
+                        onRefresh = { if (!state.scanning) state.refreshTick++ },
+                        onOpenRepo = { state.miniDetail = it },
+                        onCloseRepo = { state.miniDetail = null },
                         onOpenWorkspace = { repo -> state.open(Screen.Workspace(repo.path)) },
                         onOpenCommit = { repo, entry ->
                             state.open(Screen.CommitPage(repoPath = repo.path, hash = entry.hash))
@@ -205,7 +225,7 @@ object GitApp : HomeApplication() {
                         onOpenDiagnostics = { context.nav.openDiagnostics() },
                     )
 
-                    is Screen.Workspace -> if (layout.isWorkspace) {
+                is Screen.Workspace -> if (layout.isWorkspace) {
                         StudioWorkspace(
                             repo = state.repo(top.repoPath),
                             tab = top.tab,
@@ -536,6 +556,22 @@ internal class GitState(
     var opOutcome by mutableStateOf<GitOpOutcome?>(null)
     var inFlightOp by mutableStateOf<OpRequest?>(null)
     var opTick by mutableIntStateOf(0)
+
+    /** True while a scan is running — the cards show a loading indicator, never a silent stall. */
+    var scanning by mutableStateOf(false)
+
+    /** The repository open in the MINI card's detail view (null = the list). */
+    var miniDetail by mutableStateOf<String?>(null)
+
+    /** One scan: the guest exec runs on IO, the flag brackets it (cleared even on cancellation). */
+    suspend fun rescan() {
+        scanning = true
+        try {
+            ui = scanToUi(withContext(Dispatchers.IO) { probe.snapshot() })
+        } finally {
+            scanning = false
+        }
+    }
 
     /** Guarantees each launched op runs once, however often the effect restarts. */
     val opRunOnce = RunOnce()

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -120,21 +121,43 @@ internal fun BackHeader(title: String, onBack: () -> Unit) {
     }
 }
 
-/** The one refresh control: compact icon-first, named for accessibility. */
+/**
+ * The one refresh control: compact icon-first, named for accessibility. While a
+ * scan runs ([loading]) it dims and says so — a tap then does nothing new.
+ */
 @Composable
-internal fun RefreshButton(onRefresh: () -> Unit) {
+internal fun RefreshButton(onRefresh: () -> Unit, loading: Boolean = false) {
     Box(
         modifier = Modifier
             .size(28.dp)
-            .clickable(role = Role.Button, onClickLabel = "Refresh repositories") { onRefresh() },
+            .clickable(enabled = !loading, role = Role.Button, onClickLabel = "Refresh repositories") { onRefresh() },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = Icons.Outlined.Refresh,
-            contentDescription = "Refresh repositories",
-            tint = HomeTokens.accent,
+            contentDescription = if (loading) "Scanning repositories" else "Refresh repositories",
+            tint = if (loading) HomeTokens.textDim else HomeTokens.accent,
             modifier = Modifier.size(18.dp),
         )
+    }
+}
+
+/**
+ * A 2dp rule under the header: a thin indeterminate accent line while a scan
+ * runs, the plain hairline otherwise (same height, so nothing jumps).
+ */
+@Composable
+internal fun LoadingRule(active: Boolean, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxWidth().height(2.dp)) {
+        if (active) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(2.dp),
+                color = HomeTokens.accent,
+                trackColor = HomeTokens.hairline,
+            )
+        } else {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(HomeTokens.hairline).align(Alignment.BottomStart))
+        }
     }
 }
 

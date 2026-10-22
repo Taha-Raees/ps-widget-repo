@@ -271,11 +271,14 @@ class GitAppContractTest {
             "the read epoch bumps after every op - deeper screens re-read",
             app.contains("state.readEpoch++"),
         )
+        val effect = app.substring(app.indexOf("LaunchedEffect(state.opTick)"))
         assertTrue(
             "the rescan follows the op in the same effect",
-            Regex(
-                """state\.ui = scanToUi\(withContext\(Dispatchers\.IO\) \{ state\.probe\.snapshot\(\) \}\)""",
-            ).containsMatchIn(app),
+            effect.indexOf("state.readEpoch++") in 0 until effect.indexOf("state.rescan()"),
+        )
+        assertTrue(
+            "and rescan() IS the one real snapshot (on IO)",
+            Regex("""suspend fun rescan\(\)[\s\S]*?withContext\(Dispatchers\.IO\) \{ probe\.snapshot\(\) \}""").containsMatchIn(app),
         )
     }
 
