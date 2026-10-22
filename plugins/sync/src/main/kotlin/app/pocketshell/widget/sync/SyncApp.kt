@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -57,7 +58,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import app.pocketshell.packages.ProcessBuilderGuestCommandRunner
 import app.pocketshell.runtime.GuestExecutionProfile
-import app.pocketshell.runtime.RuntimeProcessLauncher
 import app.pocketshell.runtime.RuntimeState
 import app.pocketshell.runtime.RuntimeStorage
 import app.pocketshell.terminal.ShellEnvironment
@@ -154,10 +154,24 @@ object SyncApp : HomeApplication() {
         val state = remember {
             context.stateStore.forApp(SYNC_ID) { SyncState(SyncProbe(guestExec(appContext))) }
         }
+        // The backup/restore half: its own repository + process-scoped holder
+        // (its operations run on the holder's scope, never on this composition).
+        val vaultRepository = remember { VaultRepository(appContext) }
+        val vault = remember { state.vault ?: VaultState(appContext, vaultRepository).also { state.vault = it } }
+        val vaultSettings by vaultRepository.settings.collectAsState(initial = null)
+        LaunchedEffect(vaultSettings) { vaultSettings?.let { vault.applyLoaded(it) } }
+        LaunchedEffect(context.runtimeState, vault.loaded) {
+            if (context.runtimeState == RuntimeState.READY && vault.loaded) vault.refreshAll()
+        }
         // null until DataStore's first emission — the honest loading state.
         val profilesState by repository.profiles.collectAsState(initial = null)
         val scope = rememberCoroutineScope()
         val lifecycleOwner = LocalLifecycleOwner.current
+
+        // Is the card actually showing? Home keeps several applications composed side
+        // by side, so "resumed" is not "visible": the guest probe must not run while
+        // the user is on another page (it made Home stutter).
+        val onScreen = remember { mutableStateOf(false) }
 
         suspend fun runScan() {
             val profiles = state.profilesRef.value
@@ -180,22 +194,27 @@ object SyncApp : HomeApplication() {
                 .distinctUntilChanged()
                 .collectLatest { active ->
                     if (!active) return@collectLatest
-                    // The holder's cached snapshot is already on screen;
-                    // only the probe's idle gate decides whether RETURNING
-                    // to the card costs a probe. The gate passes on the
-                    // first ever visit and when the last scan is stale.
-                    if (state.probe.shouldFullScan(System.currentTimeMillis())) runScan()
-                    while (true) {
-                        delay(SyncProbe.TICK_MS)
-                        // M8.4.3 — the render clock for relative times
-                        // ("2h ago · OK"): a pure state write, no exec.
-                        state.nowMs = System.currentTimeMillis()
-                        // The idle gate: a tick that fires too soon after
-                        // the last scan does NOTHING — no guest exec while
-                        // the card sits open and idle.
-                        if (!state.probe.shouldFullScan(System.currentTimeMillis())) continue
-                        runScan()
-                    }
+                    snapshotFlow { onScreen.value }
+                        .distinctUntilChanged()
+                        .collectLatest { shown ->
+                            if (!shown) return@collectLatest
+                            // The holder's cached snapshot is already on screen;
+                            // only the probe's idle gate decides whether RETURNING
+                            // to the card costs a probe. The gate passes on the
+                            // first ever visit and when the last scan is stale.
+                            if (state.probe.shouldFullScan(System.currentTimeMillis())) runScan()
+                            while (true) {
+                                delay(SyncProbe.TICK_MS)
+                                // M8.4.3 — the render clock for relative times
+                                // ("2h ago · OK"): a pure state write, no exec.
+                                state.nowMs = System.currentTimeMillis()
+                                // The idle gate: a tick that fires too soon after
+                                // the last scan does NOTHING — no guest exec while
+                                // the card sits open and idle.
+                                if (!state.probe.shouldFullScan(System.currentTimeMillis())) continue
+                                runScan()
+                            }
+                        }
                 }
         }
 
@@ -251,7 +270,9 @@ object SyncApp : HomeApplication() {
             state.resetDraft()
         }
 
-        BackHandler(enabled = state.formOpen || selected != null) {
+        // In the studio, the profile screens (and their Back) are only on screen on the SYNC tab;
+        // on BACKUP / RESTORE a hidden profile detail must not swallow Back.
+        BackHandler(enabled = (state.formOpen || selected != null) && (!vault.studioVisible || vault.tab == StudioTab.SYNC)) {
             if (state.formOpen) closeForm() else state.detailId = null
         }
 
@@ -352,8 +373,12 @@ object SyncApp : HomeApplication() {
             state.previewUi = PreviewUi.Done(result)
         }
 
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val layout = SyncLayout.from(maxWidth.value, maxHeight.value)
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().trackOnScreen(onScreen)) {
+            val screenLayout = SyncLayout.from(maxWidth.value, maxHeight.value)
+            val vaultHeader: @Composable () -> Unit = { VaultCardHeader(vault, state.nowMs) }
+            // The profile app (overview / form / detail) — unchanged — renders on
+            // the card AND inside the studio's SYNC tab.
+            val profilesContent: @Composable (SyncLayout, Boolean) -> Unit = { layout, studio ->
             when {
                 state.formOpen -> SyncForm(
                     state = state,
@@ -386,8 +411,8 @@ object SyncApp : HomeApplication() {
                     verifyUi = state.verifyUi,
                     onVerify = { state.verifyTick++ },
                     nowMs = state.nowMs,
-                    roomy = layout == SyncLayout.ROOMY,
-                    maxEntries = if (layout == SyncLayout.ROOMY) {
+                    roomy = layout != SyncLayout.COMPACT,
+                    maxEntries = if (layout != SyncLayout.COMPACT) {
                         SyncLayout.DETAIL_MAX_ENTRIES_ROOMY
                     } else {
                         SyncLayout.DETAIL_MAX_ENTRIES_COMPACT
@@ -421,7 +446,15 @@ object SyncApp : HomeApplication() {
                     },
                     onOpenLinuxShell = { context.nav.openLinuxShell() },
                     onOpenDiagnostics = { context.nav.openDiagnostics() },
+                    header = if (studio) null else vaultHeader,
+                    title = if (studio) "Profiles" else "Sync",
                 )
+            }
+            }
+            if (screenLayout.isStudio) {
+                SyncStudio(vault, maxWidth.value, state.nowMs) { profilesContent(SyncLayout.ROOMY, true) }
+            } else {
+                profilesContent(screenLayout, false)
             }
         }
     }
@@ -437,7 +470,9 @@ object SyncApp : HomeApplication() {
     private fun guestExec(appContext: Context): SyncProbe.GuestExec =
         SyncProbe.GuestExec { argv, timeoutMs ->
             val storage = RuntimeStorage(appContext.noBackupFilesDir)
-            val spec = RuntimeProcessLauncher.buildLaunchSpec(
+            // GuestLaunch, not a direct call: buildLaunchSpec$default breaks on a
+            // host whose parameter list grew since the API jar was cut.
+            val spec = GuestLaunch.spec(
                 nativeLibraryDir = appContext.applicationInfo.nativeLibraryDir,
                 rootfsDir = storage.rootfsDir,
                 hostCwd = ShellEnvironment.homeDir(appContext),
@@ -484,6 +519,9 @@ object SyncApp : HomeApplication() {
  * profile RECORDS live in the DataStore, as before.
  */
 internal class SyncState(val probe: SyncProbe) {
+
+    /** The backup/restore holder (process-scoped like everything here); created once by Content. */
+    var vault: VaultState? = null
 
     /** M8.4.5 — path-completion state for the new-profile form. */
     var sourceSuggestions by mutableStateOf<List<String>>(emptyList())
@@ -623,7 +661,12 @@ internal enum class SyncLayout(
     val showsStatusHeader: Boolean,
 ) {
     COMPACT(showsSubline = false, showsStatusHeader = false),
-    ROOMY(showsSubline = true, showsStatusHeader = true);
+    ROOMY(showsSubline = true, showsStatusHeader = true),
+
+    /** The maximized page: the backup/restore studio (SyncStudio.kt). */
+    FULL(showsSubline = true, showsStatusHeader = true);
+
+    val isStudio: Boolean get() = this == FULL
 
     companion object {
         const val ROOMY_MIN_WIDTH_DP = 420f
@@ -632,8 +675,32 @@ internal enum class SyncLayout(
         const val DETAIL_MAX_ENTRIES_ROOMY = 20
         const val MAX_NOTICES_SHOWN = 2
 
-        fun from(widthDp: Float, heightDp: Float): SyncLayout =
-            if (widthDp >= ROOMY_MIN_WIDTH_DP && heightDp >= ROOMY_MIN_HEIGHT_DP) ROOMY else COMPACT
+        /** A maximized page is never this short; a card never gets this tall. */
+        const val FULL_MIN_HEIGHT_DP = 400f
+
+        /** Narrowest page the studio is laid out for (a small phone). */
+        const val FULL_MIN_WIDTH_DP = 320f
+
+        /** A landscape phone page: wide, but under [FULL_MIN_HEIGHT_DP] tall. */
+        const val FULL_LANDSCAPE_MIN_HEIGHT_DP = 300f
+
+        /** Side navigation rail instead of the bottom bar from this width. */
+        const val WORKSPACE_MIN_WIDTH_DP = 600f
+
+        fun usesSideRail(widthDp: Float): Boolean = widthDp >= WORKSPACE_MIN_WIDTH_DP
+
+        /**
+         * FULL is decided by HEIGHT first: a portrait phone page is only
+         * ~410dp wide (under [ROOMY_MIN_WIDTH_DP]) yet ~800dp tall, and a card
+         * is never that tall — so width alone must not demote the maximized
+         * page to the card hierarchy.
+         */
+        fun from(widthDp: Float, heightDp: Float): SyncLayout = when {
+            widthDp >= FULL_MIN_WIDTH_DP && heightDp >= FULL_MIN_HEIGHT_DP -> FULL
+            widthDp >= WORKSPACE_MIN_WIDTH_DP && heightDp >= FULL_LANDSCAPE_MIN_HEIGHT_DP -> FULL
+            widthDp >= ROOMY_MIN_WIDTH_DP && heightDp >= ROOMY_MIN_HEIGHT_DP -> ROOMY
+            else -> COMPACT
+        }
     }
 }
 
@@ -650,6 +717,9 @@ private fun SyncOverview(
     onOpenForm: () -> Unit,
     onOpenLinuxShell: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    /** The card's backup status, rendered under the title (null on the profiles tab). */
+    header: (@Composable () -> Unit)? = null,
+    title: String = "Sync",
 ) {
     val ready = ui as? SyncUi.Ready
     Column(modifier = Modifier.fillMaxSize()) {
@@ -658,7 +728,7 @@ private fun SyncOverview(
         // word button spent a whole footer line the rows need.
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "Sync",
+                text = title,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = HomeTokens.textPrimary,
@@ -688,6 +758,11 @@ private fun SyncOverview(
                     )
                 }
             }
+        }
+
+        header?.let {
+            Spacer(Modifier.height(4.dp))
+            it()
         }
 
         // Status area — backend availability, roomy cards only.

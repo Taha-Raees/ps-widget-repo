@@ -207,7 +207,15 @@ class SyncAppContractTest {
         val all = syncSources().joinToString("\n") { it.second }
         val code = stripCommentsAndStrings(all)
         assertTrue(
-            "guest commands go through the sanctioned launcher",
+            "guest commands go through the ONE launch seam (GuestLaunch)",
+            code.contains("GuestLaunch.spec"),
+        )
+        assertTrue(
+            "GuestLaunch is the single file that reaches the host's launch builder",
+            code.contains("RuntimeProcessLauncher::class.java"),
+        )
+        assertFalse(
+            "no direct synthetic-default call may come back (buildLaunchSpec\$default drift)",
             code.contains("RuntimeProcessLauncher.buildLaunchSpec"),
         )
         assertTrue(
