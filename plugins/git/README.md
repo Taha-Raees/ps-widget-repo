@@ -11,7 +11,7 @@ SHA-256 and loads with `DexClassLoader`.
 |---|---|
 | Catalog id | `git` |
 | Entry class | `app.pocketshell.widget.git.GitPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.2.0` |
+| Current version | `3.2.1` |
 | Namespace | `app.pocketshell.widget.git` |
 | Source of truth | THIS directory |
 
@@ -45,6 +45,9 @@ SHA-256 and loads with `DexClassLoader`.
 ## Source layout
 
 - `GitPlugin.kt` — entry point; `create()` returns the `GitApp` HomeApplication
+- `GuestLaunch.kt` — the one seam onto the host's launch builder; resolves
+  `buildLaunchSpec` at runtime so host parameter drift (3.2.1: the host grew
+  an `engine` parameter) cannot break linking
 - `GitApp.kt` — the application object, the ONE guest exec seam, the nav
   stack, read slots and the op pipeline (`GitState`)
 - `GitLayout.kt` — COMPACT / ROOMY / FULL responsive tiers
@@ -73,6 +76,6 @@ workstation (3.1.0 supersedes a parallel 3.0.0 build).
 
 ```bash
 ./gradlew :plugins:git:assembleDebug :plugins:git:testDebugUnitTest
-tools/build-plugin.sh git 3.2.0               # build + dex to releases/git/3.2.0/plugin.jar
+tools/build-plugin.sh git 3.2.1               # build + dex to releases/git/3.2.1/plugin.jar
 tools/build-plugin.sh git 3.0.1 --update-catalog   # publish a new version + pin sha256 in catalog.json
 ```

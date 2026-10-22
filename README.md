@@ -43,7 +43,7 @@ tools/validate-catalog.py    validate catalog.json (CI gate)
 
 | id | entry class | version | sources |
 |----|-------------|---------|---------|
-| `git` | `app.pocketshell.widget.git.GitPlugin` | 3.2.0 | `plugins/git/` |
+| `git` | `app.pocketshell.widget.git.GitPlugin` | 3.2.1 | `plugins/git/` |
 | `sync` | `app.pocketshell.widget.sync.SyncPlugin` | 2.0.0 | `plugins/sync/` |
 | `servers` | `app.pocketshell.widget.servers.ServersPlugin` | 2.0.0 | `plugins/servers/` |
 | `hello` | `repo.hello.HelloPlugin` | 1.0.0 | `plugins/hello/` (minimal shape — start new plugins here) |

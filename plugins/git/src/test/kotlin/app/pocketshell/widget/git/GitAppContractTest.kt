@@ -149,8 +149,20 @@ class GitAppContractTest {
     fun `the exec closure lives only in GitApp on the sanctioned guest path`() {
         val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
         assertTrue(
-            "specs must come from the ONE launch builder",
-            app.contains("RuntimeProcessLauncher.buildLaunchSpec"),
+            "specs must come from the ONE launch builder (GuestLaunch)",
+            app.contains("GuestLaunch.spec"),
+        )
+        // GuestLaunch is the single seam onto the host's launch builder; it
+        // resolves the method at runtime so host parameter drift cannot
+        // break linking (buildLaunchSpec\$default).
+        val launch = stripCommentsAndStrings(gitSource("GuestLaunch.kt"))
+        assertTrue(
+            "GuestLaunch must be the one file that reaches RuntimeProcessLauncher",
+            launch.contains("RuntimeProcessLauncher"),
+        )
+        assertTrue(
+            "no direct synthetic-default call may come back into GitApp",
+            !app.contains("RuntimeProcessLauncher.buildLaunchSpec"),
         )
         assertTrue(
             "the minimal device-proven profile is the exec's mount configuration",

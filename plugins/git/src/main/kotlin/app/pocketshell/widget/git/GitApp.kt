@@ -18,7 +18,6 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import app.pocketshell.packages.ProcessBuilderGuestCommandRunner
 import app.pocketshell.runtime.GuestExecutionProfile
-import app.pocketshell.runtime.RuntimeProcessLauncher
 import app.pocketshell.runtime.RuntimeState
 import app.pocketshell.runtime.RuntimeStorage
 import app.pocketshell.terminal.ShellEnvironment
@@ -283,7 +282,9 @@ object GitApp : HomeApplication() {
      */
     private fun guestExec(appContext: Context): GitProbe.GuestExec = GitProbe.GuestExec { argv, timeoutMs ->
         val storage = RuntimeStorage(appContext.noBackupFilesDir)
-        val spec = RuntimeProcessLauncher.buildLaunchSpec(
+        // GuestLaunch, not a direct call: buildLaunchSpec$default breaks on a
+        // host whose parameter list grew since the API jar was cut.
+        val spec = GuestLaunch.spec(
             nativeLibraryDir = appContext.applicationInfo.nativeLibraryDir,
             rootfsDir = storage.rootfsDir,
             hostCwd = ShellEnvironment.homeDir(appContext),
