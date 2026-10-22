@@ -67,6 +67,9 @@ labels over comm/argv and say no more than the rule matched.
 
 ## Cost discipline
 
+The monitor also runs ONLY while its card is on screen (window-bounds test): Home keeps
+several applications composed side by side, so "resumed" is not "visible".
+
 The pid-set idle gate turns an idle card's tick into ONE /proc readdir;
 a card with servers re-verifies (the host probe's own rule); the process scan
 runs when the pid set changed, on every tick while the maximized page is

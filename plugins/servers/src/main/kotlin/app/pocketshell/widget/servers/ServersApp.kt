@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -109,6 +110,10 @@ object ServersApp : HomeApplication() {
         }
         val lifecycleOwner = LocalLifecycleOwner.current
 
+        // Is the card actually showing? Home keeps several applications composed side by
+        // side, so "resumed" is not "visible": scans must not run for an off-screen card.
+        val onScreen = remember { mutableStateOf(false) }
+
         // The monitor's lifecycle-aware tick: while resumed and not
         // paused, the pid-set gate decides each pass — an idle card's
         // only cost is one /proc readdir, a card with servers always
@@ -123,12 +128,18 @@ object ServersApp : HomeApplication() {
                 .distinctUntilChanged()
                 .collectLatest { active ->
                     if (!active) return@collectLatest
-                    while (true) {
-                        if (!state.paused) {
-                            state.tickIfDue()
+                    // Only while the card is on screen: paging or scrolling away stops the ticks.
+                    snapshotFlow { onScreen.value }
+                        .distinctUntilChanged()
+                        .collectLatest { shown ->
+                            if (!shown) return@collectLatest
+                            while (true) {
+                                if (!state.paused) {
+                                    state.tickIfDue()
+                                }
+                                delay(TICK_MS)
+                            }
                         }
-                        delay(TICK_MS)
-                    }
                 }
         }
 
@@ -161,7 +172,7 @@ object ServersApp : HomeApplication() {
         // list; only from the list does back reach Home.
         BackHandler(enabled = state.hasSelection) { state.clearSelection() }
 
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        BoxWithConstraints(modifier = Modifier.fillMaxSize().trackOnScreen(onScreen)) {
             val layout = ServersLayout.from(maxWidth.value, maxHeight.value)
 
             state.stopPending?.let { pending ->
