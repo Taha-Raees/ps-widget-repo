@@ -362,4 +362,28 @@ class GitAppContractTest {
             components.contains("if (slot.gen == gen)"),
         )
     }
+
+    // -------------------------------------- 7. a mutation runs at most once
+
+    @Test
+    fun `a launched op is claimed once, however often the effect restarts`() {
+        val once = RunOnce()
+        assertFalse("tick 0 means nothing was launched", once.claim(0))
+        assertTrue(once.claim(1))
+        assertFalse("the restarted effect must not re-run the op", once.claim(1))
+        assertTrue(once.claim(2))
+        assertFalse(once.claim(2))
+    }
+
+    @Test
+    fun `the op effect claims before it runs and always clears busy`() {
+        val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
+        val effect = app.substring(app.indexOf("LaunchedEffect(state.opTick)"))
+        val claim = effect.indexOf("opRunOnce.claim")
+        val run = effect.indexOf("ops.run(")
+        val fin = effect.indexOf("finally")
+        val clear = effect.indexOf("inFlightOp = null")
+        assertTrue("the claim must precede the exec", claim in 0 until run)
+        assertTrue("busy must be cleared in a finally, cancellation included", fin > run && clear > fin)
+    }
 }

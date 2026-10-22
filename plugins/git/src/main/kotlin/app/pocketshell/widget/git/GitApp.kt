@@ -130,13 +130,25 @@ object GitApp : HomeApplication() {
         // THE mutation path: one op at a time, run to completion, then a
         // FORCED rescan + read-epoch bump, so every pixel afterwards is
         // git's own answer — never an optimistic guess.
+        //
+        // AT MOST ONCE: this state outlives the composition (rotation, leaving
+        // Home), and a LaunchedEffect restarts when it re-enters. An effect
+        // cancelled mid-exec used to leave `inFlightOp` set, so the restarted
+        // effect ran the same mutation a second time (a second commit, push,
+        // reset). The request is claimed before it runs and busy is cleared in
+        // a finally, cancellation included.
         LaunchedEffect(state.opTick) {
             val req = state.inFlightOp ?: return@LaunchedEffect
-            val outcome = withContext(Dispatchers.IO) { state.ops.run(req.op, req.repoPath) }
-            state.opOutcome = outcome
-            state.inFlightOp = null
-            state.probe.invalidate()
-            state.readEpoch++
+            if (!state.opRunOnce.claim(state.opTick)) return@LaunchedEffect
+            try {
+                state.opOutcome = withContext(Dispatchers.IO) { state.ops.run(req.op, req.repoPath) }
+            } finally {
+                state.inFlightOp = null
+                // Even when the outcome was lost to a cancellation, the next
+                // resume re-reads git instead of trusting a pre-mutation cache.
+                state.probe.invalidate()
+                state.readEpoch++
+            }
             state.ui = scanToUi(withContext(Dispatchers.IO) { state.probe.snapshot() })
         }
 
@@ -525,6 +537,9 @@ internal class GitState(
     var inFlightOp by mutableStateOf<OpRequest?>(null)
     var opTick by mutableIntStateOf(0)
 
+    /** Guarantees each launched op runs once, however often the effect restarts. */
+    val opRunOnce = RunOnce()
+
     private var opSerial = 0
 
     /**
@@ -587,4 +602,18 @@ internal sealed interface GitUi {
 internal fun scanToUi(result: ScanResult): GitUi = when (result) {
     is ScanResult.Done -> GitUi.Ready(result.snapshot)
     is ScanResult.Failed -> GitUi.ProbeFailed(result.reason)
+}
+
+/**
+ * "Claim a tick exactly once" — the guard that keeps a restarted effect from
+ * re-running a mutation it already started. Tick 0 means nothing was launched.
+ */
+internal class RunOnce {
+    private var last = 0
+
+    fun claim(tick: Int): Boolean {
+        if (tick == last) return false
+        last = tick
+        return true
+    }
 }

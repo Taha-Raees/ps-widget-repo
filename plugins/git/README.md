@@ -11,7 +11,7 @@ SHA-256 and loads with `DexClassLoader`.
 |---|---|
 | Catalog id | `git` |
 | Entry class | `app.pocketshell.widget.git.GitPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.3.0` |
+| Current version | `3.3.1` |
 | Namespace | `app.pocketshell.widget.git` |
 | Source of truth | THIS directory |
 
@@ -79,6 +79,6 @@ workstation (3.1.0 supersedes a parallel 3.0.0 build).
 
 ```bash
 ./gradlew :plugins:git:assembleDebug :plugins:git:testDebugUnitTest
-tools/build-plugin.sh git 3.3.0               # build + dex to releases/git/3.3.0/plugin.jar
+tools/build-plugin.sh git 3.3.1               # build + dex to releases/git/3.3.1/plugin.jar
 tools/build-plugin.sh git 3.0.1 --update-catalog   # publish a new version + pin sha256 in catalog.json
 ```
