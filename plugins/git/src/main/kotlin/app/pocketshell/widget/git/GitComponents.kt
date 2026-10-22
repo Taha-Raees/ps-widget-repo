@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +28,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocal
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +56,19 @@ import kotlinx.coroutines.withContext
  * a color — and every control is sized for a thumb, not a cursor.
  */
 
+/**
+ * True on the maximized page (GitLayout.FULL): the SAME rows and text,
+ * scaled up for a full screen — larger type, thumb-sized row spacing. The
+ * card never sets it, so card density is untouched.
+ */
+internal val LocalGitFull = compositionLocalOf { false }
+
+private const val FULL_TEXT_SCALE = 1.15f
+
+/** Vertical padding of a list row: tight in the card, thumb-sized when maximized. */
+internal val rowVerticalPadding: androidx.compose.ui.unit.Dp
+    @Composable get() = if (LocalGitFull.current) 7.dp else 2.dp
+
 /** Mono text at the app's row size — the ONE text style rows use. */
 @Composable
 internal fun MonoText(
@@ -66,7 +82,7 @@ internal fun MonoText(
     Text(
         text = text,
         fontFamily = TerminalTheme.mono,
-        fontSize = fontSize,
+        fontSize = if (LocalGitFull.current) fontSize * FULL_TEXT_SCALE else fontSize,
         color = color,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
@@ -94,6 +110,7 @@ internal fun BackHeader(title: String, onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = if (LocalGitFull.current) 48.dp else 0.dp)
             .clickable(role = Role.Button, onClickLabel = "Back") { onBack() },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -166,7 +183,7 @@ internal fun FileRow(
                     Modifier
                 },
             )
-            .padding(vertical = 2.dp),
+            .padding(vertical = rowVerticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         MonoText(
@@ -195,7 +212,7 @@ internal fun CommitRow(entry: LogEntry, roomy: Boolean, onOpen: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clickable(role = Role.Button, onClickLabel = "Show commit ${entry.hash}") { onOpen() }
-            .padding(vertical = 2.dp),
+            .padding(vertical = rowVerticalPadding),
     ) {
         MonoText(text = entry.hash, color = HomeTokens.textDim)
         Spacer(Modifier.width(6.dp))
@@ -228,7 +245,7 @@ internal fun BranchRow(branch: Branch, isCurrent: Boolean, onClick: (() -> Unit)
                     Modifier
                 },
             )
-            .padding(vertical = 2.dp),
+            .padding(vertical = rowVerticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         MonoText(
@@ -259,7 +276,7 @@ internal fun BranchRow(branch: Branch, isCurrent: Boolean, onClick: (() -> Unit)
 /** One remote: name + the sanitized, shortened URL. */
 @Composable
 internal fun RemoteRow(remote: Remote) {
-    Row(modifier = Modifier.padding(vertical = 2.dp)) {
+    Row(modifier = Modifier.padding(vertical = rowVerticalPadding)) {
         MonoText(text = remote.name, modifier = Modifier.width(64.dp))
         MonoText(
             text = remote.fetchUrl?.let { GitPresentation.displayUrl(it) } ?: "—",

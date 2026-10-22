@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,12 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Archive
-import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.Cloud
@@ -38,7 +40,6 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,9 +49,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,20 +62,19 @@ import app.pocketshell.ui.theme.TerminalTheme
 /**
  * GIT STUDIO — the maximized page, laid out as a stand-alone Git app.
  *
- * The card (COMPACT/ROOMY) is a glance: chips + a pane. The maximized page
- * is a different product shape, not the same list stretched: a large app
- * bar, summary tiles, one card per repository; inside a repository an app
- * bar with the branch, one-thumb quick actions (fetch / pull / push /
- * stash) and real navigation — a bottom bar on a phone, a side rail on a
- * wide page — instead of a scrolling strip of text tabs.
+ * Same visual language as the rest of PocketShell: flat, no filled cards, no
+ * rounded surfaces — hairline rules, mono small-caps section labels, accent
+ * text, and a rule (not a pill) marking the active item. What differs from
+ * the card is the PRODUCT SHAPE, not the paint: a large title, one summary
+ * strip, one row per repository; inside a repository an app bar, thumb-sized
+ * quick actions (fetch / pull / push / stash) and real navigation — a bottom
+ * bar on a phone, a side rail on a wide page — instead of a scrolling strip
+ * of text tabs. Everything is scaled up for a full screen (LocalGitFull).
  *
  * Presentation only: every read and mutation still goes through the same
  * [GitState] seams the card uses, so nothing here can show a state git did
  * not report.
  */
-
-private val CardShape = RoundedCornerShape(16.dp)
-private val PillShape = RoundedCornerShape(50)
 
 /** The bottom bar's slots; the rest sit behind "More". */
 private val PRIMARY_TABS = listOf(RepoTab.OVERVIEW, RepoTab.CHANGES, RepoTab.HISTORY, RepoTab.BRANCHES, RepoTab.FILES)
@@ -94,10 +95,15 @@ internal val RepoTab.icon: ImageVector
 // ------------------------------------------------------------ primitives
 
 @Composable
+private fun Hairline(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(1.dp).background(HomeTokens.hairline))
+}
+
+@Composable
 private fun StudioIconButton(icon: ImageVector, description: String, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(48.dp)
             .clickable(enabled = enabled, role = Role.Button, onClickLabel = description) { onClick() },
         contentAlignment = Alignment.Center,
     ) {
@@ -110,33 +116,45 @@ private fun StudioIconButton(icon: ImageVector, description: String, enabled: Bo
     }
 }
 
-@Composable
-private fun Pill(text: String, color: Color, filled: Boolean = false) {
-    Box(
-        modifier = Modifier
-            .background(if (filled) color.copy(alpha = 0.16f) else Color.Transparent, PillShape)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    ) {
-        MonoText(text = text, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-    }
-}
+private data class StripItem(
+    val value: String,
+    val label: String,
+    val hot: Boolean = false,
+    val onClick: (() -> Unit)? = null,
+)
 
+/** A flat row of big numbers over small-caps labels, ruled above and below. */
 @Composable
-private fun StatTile(value: String, label: String, modifier: Modifier = Modifier, hot: Boolean = false, onClick: (() -> Unit)? = null) {
-    Column(
-        modifier = modifier
-            .background(HomeTokens.surfaceRaised, CardShape)
-            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClickLabel = "Show $label") { onClick() } else Modifier)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-    ) {
-        Text(
-            text = value,
-            fontFamily = TerminalTheme.mono,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (hot) HomeTokens.accent else HomeTokens.textPrimary,
-        )
-        MonoText(text = label.uppercase(), color = HomeTokens.textDim, fontSize = 9.sp)
+private fun StatStrip(items: List<StripItem>, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        Hairline()
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            items.forEachIndexed { i, item ->
+                if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(HomeTokens.hairline))
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(
+                            if (item.onClick != null) {
+                                Modifier.clickable(role = Role.Button, onClickLabel = "Show ${item.label}") { item.onClick.invoke() }
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        text = item.value,
+                        fontFamily = TerminalTheme.mono,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (item.hot) HomeTokens.accent else HomeTokens.textPrimary,
+                    )
+                    MonoText(text = item.label.uppercase(), color = HomeTokens.textDim, fontSize = 9.sp)
+                }
+            }
+        }
+        Hairline()
     }
 }
 
@@ -163,14 +181,14 @@ internal fun StudioHome(
                     Text(
                         text = "Repositories",
                         fontSize = 26.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         color = HomeTokens.textPrimary,
                     )
                     val facts = listOfNotNull(
                         ready?.snapshot?.gitVersion?.let { "git $it" },
                         if (repos.isNotEmpty()) "scanned ${GitPresentation.ageLabel(System.currentTimeMillis(), lastScanAtMs)}" else null,
                     )
-                    if (facts.isNotEmpty()) MonoText(text = facts.joinToString(" · "), color = HomeTokens.textDim, fontSize = 11.sp)
+                    if (facts.isNotEmpty()) MonoText(text = facts.joinToString(" · "), color = HomeTokens.textDim, fontSize = 10.sp)
                 }
                 StudioIconButton(Icons.Outlined.Terminal, "Open terminal", onClick = onOpenTerminal)
                 StudioIconButton(Icons.Outlined.Refresh, "Refresh repositories", onClick = onRefresh)
@@ -179,36 +197,26 @@ internal fun StudioHome(
             if (repos.isNotEmpty()) {
                 val ahead = repos.sumOf { it.status?.ahead ?: 0 }
                 val behind = repos.sumOf { it.status?.behind ?: 0 }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    StatTile("${repos.size}", "repos", Modifier.weight(1f))
-                    StatTile("${ready?.snapshot?.dirtyRepos ?: 0}", "dirty", Modifier.weight(1f), hot = (ready?.snapshot?.dirtyRepos ?: 0) > 0)
-                    StatTile("↑$ahead", "to push", Modifier.weight(1f), hot = ahead > 0)
-                    StatTile("↓$behind", "to pull", Modifier.weight(1f), hot = behind > 0)
-                }
-                if (repos.size > 3) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        placeholder = { MonoText("Filter repositories", color = HomeTokens.textDim, fontSize = 12.sp) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                    )
-                }
+                val dirty = ready?.snapshot?.dirtyRepos ?: 0
+                StatStrip(
+                    items = listOf(
+                        StripItem("${repos.size}", "repos"),
+                        StripItem("$dirty", "dirty", hot = dirty > 0),
+                        StripItem("↑$ahead", "to push", hot = ahead > 0),
+                        StripItem("↓$behind", "to pull", hot = behind > 0),
+                    ),
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                if (repos.size > 3) FilterField(query) { query = it }
                 val shown = repos.filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .verticalScroll(rememberScrollState())
-                        .padding(top = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
+                Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     shown.chunked(columns).forEach { rowRepos ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        Row(modifier = Modifier.fillMaxWidth()) {
                             rowRepos.forEach { repo ->
-                                RepoCard(repo, Modifier.weight(1f)) { onOpenWorkspace(repo) }
+                                Column(Modifier.weight(1f)) {
+                                    RepoRow(repo) { onOpenWorkspace(repo) }
+                                    Hairline()
+                                }
                             }
                             if (rowRepos.size < columns) Spacer(Modifier.weight((columns - rowRepos.size).toFloat()))
                         }
@@ -223,6 +231,28 @@ internal fun StudioHome(
             }
         }
     }
+}
+
+/** A plain underlined field — no outlined box. */
+@Composable
+private fun FilterField(query: String, onChange: (String) -> Unit) {
+    BasicTextField(
+        value = query,
+        onValueChange = onChange,
+        singleLine = true,
+        textStyle = TextStyle(fontFamily = TerminalTheme.mono, fontSize = 14.sp, color = HomeTokens.textPrimary),
+        cursorBrush = SolidColor(HomeTokens.accent),
+        modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Column {
+                Box(modifier = Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) MonoText("FILTER REPOSITORIES", color = HomeTokens.textDim, fontSize = 10.sp)
+                    inner()
+                }
+                Hairline()
+            }
+        },
+    )
 }
 
 @Composable
@@ -251,51 +281,75 @@ private fun StudioEmpty(ui: GitUi, onOpenLinuxShell: () -> Unit, onOpenDiagnosti
     }
 }
 
+/**
+ * One repository: a 3dp state rule on the left (accent = pending changes,
+ * danger = git could not read it), name + state on one line, then branch,
+ * path and the last commit. An unreadable repository says so — it is never
+ * shown as "clean".
+ */
 @Composable
-private fun RepoCard(repo: RepoSnapshot, modifier: Modifier, onOpen: () -> Unit) {
+private fun RepoRow(repo: RepoSnapshot, onOpen: () -> Unit) {
     val status = repo.status
+    val unreadable = status == null
     val dirty = status?.dirty == true
-    Column(
-        modifier = modifier
-            .background(HomeTokens.surfaceRaised, CardShape)
-            .clickable(role = Role.Button, onClickLabel = "Open ${repo.name}") { onOpen() }
-            .padding(14.dp),
+    val rule = when {
+        unreadable -> HomeTokens.danger
+        dirty -> HomeTokens.accent
+        else -> HomeTokens.hairline
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .clickable(role = Role.Button, onClickLabel = "Open ${repo.name}") { onOpen() },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = repo.name,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = HomeTokens.textPrimary,
-                maxLines = 1,
-                modifier = Modifier.weight(1f),
-            )
-            Pill(
-                text = if (dirty) status!!.summary() else "clean",
-                color = if (dirty) HomeTokens.accent else HomeTokens.textDim,
-                filled = dirty,
-            )
-        }
-        Row(modifier = Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            MonoText(text = branchText(status), color = HomeTokens.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            val glyphs = GitPresentation.trackingGlyphs(status?.ahead, status?.behind)
-            if (glyphs.isNotEmpty()) {
-                Spacer(Modifier.width(8.dp))
-                MonoText(text = glyphs, color = HomeTokens.accent, fontSize = 12.sp)
+        Box(Modifier.width(3.dp).fillMaxHeight().background(rule))
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = repo.name,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = HomeTokens.textPrimary,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                MonoText(
+                    text = when {
+                        unreadable -> "UNREADABLE"
+                        dirty -> status.summary().uppercase()
+                        else -> "CLEAN"
+                    },
+                    color = when {
+                        unreadable -> HomeTokens.danger
+                        dirty -> HomeTokens.accent
+                        else -> HomeTokens.textDim
+                    },
+                    fontSize = 9.sp,
+                )
             }
-        }
-        MonoText(text = displayGuestRepoPath(repo.path), color = HomeTokens.textDim, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
-        repo.log.firstOrNull()?.let { last ->
-            Box(Modifier.padding(vertical = 8.dp).fillMaxWidth().height(1.dp).background(HomeTokens.hairline))
-            Row {
-                MonoText(text = last.hash, color = HomeTokens.textDim, fontSize = 11.sp)
-                Spacer(Modifier.width(8.dp))
-                MonoText(text = last.subject, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            if (status != null) {
+                Row(modifier = Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    MonoText(text = branchText(status), color = HomeTokens.accent, fontSize = 12.sp)
+                    val glyphs = GitPresentation.trackingGlyphs(status.ahead, status.behind)
+                    if (glyphs.isNotEmpty()) {
+                        Spacer(Modifier.width(8.dp))
+                        MonoText(text = glyphs, color = HomeTokens.accent, fontSize = 12.sp)
+                    }
+                }
             }
-            MonoText(text = "${last.author} · ${last.relativeTime}", color = HomeTokens.textDim, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
-        }
-        if (repo.error != null) {
-            MonoText(text = "git could not read this repository (${repo.error})", color = HomeTokens.danger, fontSize = 10.sp, maxLines = 2)
+            MonoText(text = displayGuestRepoPath(repo.path), color = HomeTokens.textDim, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
+            repo.log.firstOrNull()?.let { last ->
+                Row(modifier = Modifier.padding(top = 8.dp)) {
+                    MonoText(text = last.hash, color = HomeTokens.textDim, fontSize = 11.sp)
+                    Spacer(Modifier.width(8.dp))
+                    MonoText(text = last.subject, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                }
+                MonoText(text = "${last.author} · ${last.relativeTime}", color = HomeTokens.textDim, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+            if (repo.error != null) {
+                MonoText(text = "git could not read this repository (${repo.error})", color = HomeTokens.danger, fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(top = 6.dp))
+            }
         }
     }
 }
@@ -326,23 +380,27 @@ internal fun StudioWorkspace(
         val rail = GitLayout.usesSideRail(maxWidth.value)
         Column(modifier = Modifier.fillMaxSize()) {
             StudioTopBar(repo, onBack, onRefresh = { state.refreshTick++ }, onOpenTerminal = onOpenTerminal)
+            Hairline()
             Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                if (rail) StudioRail(tab, onTab)
+                if (rail) {
+                    StudioRail(tab, onTab)
+                    Box(Modifier.width(1.dp).fillMaxHeight().background(HomeTokens.hairline))
+                }
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(start = if (rail) 12.dp else 0.dp, top = 4.dp),
+                        .padding(start = if (rail) 12.dp else 0.dp),
                 ) {
                     QuickActions(repo, busy = state.inFlightOp != null, onOp = onOp)
-                    Spacer(Modifier.height(8.dp))
                     if (tab == RepoTab.OVERVIEW) {
                         StudioOverview(repo, onTab = onTab, onOpenCommit = onOpenCommit)
                     } else {
+                        Spacer(Modifier.height(8.dp))
                         WorkspaceTabBody(repo, tab, state, onOpenDiff, onOpenCommit, onOpenFile, onOp, onOpenTerminal)
                     }
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(16.dp))
                 }
             }
             if (!rail) StudioBottomBar(tab, onTab)
@@ -353,17 +411,17 @@ internal fun StudioWorkspace(
 @Composable
 private fun StudioTopBar(repo: RepoSnapshot, onBack: () -> Unit, onRefresh: () -> Unit, onOpenTerminal: () -> Unit) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        StudioIconButton(Icons.Outlined.ArrowBack, "Back to repositories", onClick = onBack)
-        Column(modifier = Modifier.weight(1f).padding(start = 4.dp)) {
+        StudioIconButton(Icons.AutoMirrored.Outlined.ArrowBack, "Back to repositories", onClick = onBack)
+        Column(modifier = Modifier.weight(1f).padding(start = 4.dp, bottom = 4.dp)) {
             Text(
                 text = repo.name,
                 fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.SemiBold,
                 color = HomeTokens.textPrimary,
                 maxLines = 1,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                MonoText(text = branchText(repo.status), color = HomeTokens.accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                MonoText(text = branchText(repo.status), color = HomeTokens.accent, fontSize = 12.sp)
                 val glyphs = GitPresentation.trackingGlyphs(repo.status?.ahead, repo.status?.behind)
                 if (glyphs.isNotEmpty()) {
                     Spacer(Modifier.width(8.dp))
@@ -376,60 +434,88 @@ private fun StudioTopBar(repo: RepoSnapshot, onBack: () -> Unit, onRefresh: () -
     }
 }
 
+/** Fetch / Pull / Push / Stash — icon over label, ruled, no boxes. */
 @Composable
 private fun QuickActions(repo: RepoSnapshot, busy: Boolean, onOp: (GitOp) -> Unit) {
     val hasRemote = repo.remotes.isNotEmpty()
     val status = repo.status
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ActionTile(Icons.Outlined.Sync, "Fetch", enabled = hasRemote && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.Fetch()) }
-        ActionTile(Icons.Outlined.ArrowDownward, "Pull", badge = status?.behind, enabled = hasRemote && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.Pull()) }
-        ActionTile(Icons.Outlined.ArrowUpward, "Push", badge = status?.ahead, enabled = hasRemote && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.Push()) }
-        ActionTile(Icons.Outlined.Archive, "Stash", enabled = status?.dirty == true && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.StashPush()) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            ActionItem(Icons.Outlined.Sync, "Fetch", enabled = hasRemote && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.Fetch()) }
+            ActionItem(Icons.Outlined.ArrowDownward, "Pull", badge = status?.behind, enabled = hasRemote && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.Pull()) }
+            ActionItem(Icons.Outlined.ArrowUpward, "Push", badge = status?.ahead, enabled = hasRemote && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.Push()) }
+            ActionItem(Icons.Outlined.Archive, "Stash", enabled = status?.dirty == true && !busy, modifier = Modifier.weight(1f)) { onOp(GitOp.StashPush()) }
+        }
+        Hairline()
     }
 }
 
 @Composable
-private fun ActionTile(icon: ImageVector, label: String, modifier: Modifier, badge: Int? = null, enabled: Boolean, onClick: () -> Unit) {
-    val tint = if (enabled) HomeTokens.accent else HomeTokens.textDim
+private fun ActionItem(icon: ImageVector, label: String, modifier: Modifier, badge: Int? = null, enabled: Boolean, onClick: () -> Unit) {
     Column(
         modifier = modifier
-            .heightIn(min = 60.dp)
-            .background(HomeTokens.surfaceRaised, CardShape)
+            .heightIn(min = 64.dp)
             .clickable(enabled = enabled, role = Role.Button, onClickLabel = label) { onClick() }
-            .padding(vertical = 8.dp),
+            .padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (enabled) HomeTokens.accent else HomeTokens.textDim,
+            modifier = Modifier.size(24.dp),
+        )
         MonoText(
-            text = if (badge != null && badge > 0) "$label $badge" else label,
+            text = (if (badge != null && badge > 0) "$label $badge" else label).uppercase(),
             color = if (enabled) HomeTokens.textPrimary else HomeTokens.textDim,
-            fontSize = 11.sp,
+            fontSize = 9.sp,
+            modifier = Modifier.padding(top = 2.dp),
         )
     }
 }
 
 // ------------------------------------------------------------ navigation
 
+/** The active item carries a 2dp accent rule (top on the bar, left on the rail) — never a pill. */
 @Composable
-private fun NavItem(tab: RepoTab, selected: Boolean, label: String = tab.label, icon: ImageVector = tab.icon, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun NavItem(
+    tab: RepoTab,
+    selected: Boolean,
+    ruleOnTop: Boolean,
+    modifier: Modifier = Modifier,
+    label: String = tab.label,
+    icon: ImageVector = tab.icon,
+    onClick: () -> Unit,
+) {
     val tint = if (selected) HomeTokens.accent else HomeTokens.textDim
-    Column(
+    Box(
         modifier = modifier
-            .heightIn(min = 56.dp)
-            .clickable(role = Role.Tab, onClickLabel = "Show $label") { onClick() }
-            .padding(vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+            .heightIn(min = 60.dp)
+            .clickable(role = Role.Tab, onClickLabel = "Show $label") { onClick() },
     ) {
-        Box(
-            modifier = Modifier
-                .background(if (selected) HomeTokens.accent.copy(alpha = 0.16f) else Color.Transparent, PillShape)
-                .padding(horizontal = 18.dp, vertical = 4.dp),
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        if (selected) {
+            Box(
+                Modifier
+                    .align(if (ruleOnTop) Alignment.TopCenter else Alignment.CenterStart)
+                    .then(if (ruleOnTop) Modifier.fillMaxWidth().height(2.dp) else Modifier.fillMaxHeight().width(3.dp))
+                    .background(HomeTokens.accent),
+            )
         }
-        MonoText(text = label, color = tint, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else null)
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            MonoText(
+                text = label.uppercase(),
+                color = tint,
+                fontSize = 9.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else null,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
     }
 }
 
@@ -437,17 +523,18 @@ private fun NavItem(tab: RepoTab, selected: Boolean, label: String = tab.label, 
 private fun StudioBottomBar(tab: RepoTab, onTab: (RepoTab) -> Unit) {
     var moreOpen by remember { mutableStateOf(false) }
     Column {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(HomeTokens.hairline))
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
-            PRIMARY_TABS.forEach { t -> NavItem(t, t == tab, modifier = Modifier.weight(1f)) { onTab(t) } }
+        Hairline()
+        Row(modifier = Modifier.fillMaxWidth()) {
+            PRIMARY_TABS.forEach { t -> NavItem(t, t == tab, ruleOnTop = true, modifier = Modifier.weight(1f)) { onTab(t) } }
             Box(modifier = Modifier.weight(1f)) {
                 val inMore = tab in MORE_TABS
                 NavItem(
                     tab = tab,
                     selected = inMore,
+                    ruleOnTop = true,
+                    modifier = Modifier.fillMaxWidth(),
                     label = if (inMore) tab.label else "More",
                     icon = if (inMore) tab.icon else Icons.Outlined.MoreHoriz,
-                    modifier = Modifier.fillMaxWidth(),
                 ) { moreOpen = true }
                 DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
                     MORE_TABS.forEach { t ->
@@ -470,14 +557,11 @@ private fun StudioBottomBar(tab: RepoTab, onTab: (RepoTab) -> Unit) {
 private fun StudioRail(tab: RepoTab, onTab: (RepoTab) -> Unit) {
     Column(
         modifier = Modifier
-            .width(92.dp)
-            .fillMaxSize()
-            .background(HomeTokens.surfaceRaised, CardShape)
-            .verticalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .width(88.dp)
+            .fillMaxHeight()
+            .verticalScroll(rememberScrollState()),
     ) {
-        RepoTab.entries.forEach { t -> NavItem(t, t == tab, modifier = Modifier.fillMaxWidth()) { onTab(t) } }
+        RepoTab.entries.forEach { t -> NavItem(t, t == tab, ruleOnTop = false, modifier = Modifier.fillMaxWidth()) { onTab(t) } }
     }
 }
 
@@ -486,24 +570,30 @@ private fun StudioRail(tab: RepoTab, onTab: (RepoTab) -> Unit) {
 @Composable
 private fun StudioOverview(repo: RepoSnapshot, onTab: (RepoTab) -> Unit, onOpenCommit: (String) -> Unit) {
     val status = repo.status
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(HomeTokens.surfaceRaised, CardShape)
-            .padding(14.dp),
-    ) {
-        MonoText(text = "BRANCH", color = HomeTokens.textDim, fontSize = 10.sp)
-        MonoText(text = branchText(status), color = HomeTokens.accent, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        MonoText(text = upstreamText(status), color = HomeTokens.textDim, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
-        MonoText(text = displayGuestRepoPath(repo.path), color = HomeTokens.textDim, fontSize = 10.sp, modifier = Modifier.padding(top = 2.dp))
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            MonoText(text = "BRANCH", color = HomeTokens.textDim, fontSize = 10.sp, modifier = Modifier.width(96.dp))
+            MonoText(text = branchText(status), color = HomeTokens.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            val glyphs = GitPresentation.trackingGlyphs(status?.ahead, status?.behind)
+            if (glyphs.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                MonoText(text = glyphs, color = HomeTokens.accent, fontSize = 12.sp)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        LabelRow("UPSTREAM", upstreamText(status))
+        LabelRow("PATH", displayGuestRepoPath(repo.path))
+        if (status != null) LabelRow("STATUS", status.summary())
     }
     if (status != null) {
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("${status.stagedCount}", "staged", Modifier.weight(1f), hot = status.stagedCount > 0) { onTab(RepoTab.CHANGES) }
-            StatTile("${status.changedCount}", "changed", Modifier.weight(1f), hot = status.changedCount > 0) { onTab(RepoTab.CHANGES) }
-            StatTile("${status.untrackedCount}", "new", Modifier.weight(1f), hot = status.untrackedCount > 0) { onTab(RepoTab.CHANGES) }
-            StatTile("${status.conflictCount}", "conflicts", Modifier.weight(1f), hot = status.conflictCount > 0) { onTab(RepoTab.CHANGES) }
-        }
+        StatStrip(
+            items = listOf(
+                StripItem("${status.stagedCount}", "staged", status.stagedCount > 0) { onTab(RepoTab.CHANGES) },
+                StripItem("${status.changedCount}", "changed", status.changedCount > 0) { onTab(RepoTab.CHANGES) },
+                StripItem("${status.untrackedCount}", "new", status.untrackedCount > 0) { onTab(RepoTab.CHANGES) },
+                StripItem("${status.conflictCount}", "conflicts", status.conflictCount > 0) { onTab(RepoTab.CHANGES) },
+            ),
+        )
     }
     if (repo.error != null) {
         MonoText(
@@ -515,7 +605,7 @@ private fun StudioOverview(repo: RepoSnapshot, onTab: (RepoTab) -> Unit, onOpenC
         )
     }
     if (repo.log.isNotEmpty()) {
-        GitSection("RECENT COMMITS", Modifier.padding(top = 10.dp))
+        GitSection("RECENT COMMITS", Modifier.padding(top = 12.dp))
         repo.log.forEach { entry -> CommitRow(entry, roomy = true, onOpen = { onOpenCommit(entry.hash) }) }
         TextAction("ALL HISTORY") { onTab(RepoTab.HISTORY) }
     }

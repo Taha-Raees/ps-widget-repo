@@ -11,7 +11,7 @@ SHA-256 and loads with `DexClassLoader`.
 |---|---|
 | Catalog id | `git` |
 | Entry class | `app.pocketshell.widget.git.GitPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.2.1` |
+| Current version | `3.3.0` |
 | Namespace | `app.pocketshell.widget.git` |
 | Source of truth | THIS directory |
 
@@ -20,9 +20,12 @@ SHA-256 and loads with `DexClassLoader`.
 - **Dashboard** (the minimized card): every repository under the guest
   home at a glance — branch, ahead/behind, dirty dot, one batched
   read-only probe, idle-gated.
-- **Git Studio** (the maximized page, `GitStudio.kt`): a full-screen app shell
-  — repository cards + summary tiles, an app bar with branch, one-thumb
-  Fetch/Pull/Push/Stash actions, bottom navigation (side rail on wide pages).
+- **Git Studio** (the maximized page, `GitStudio.kt`): a full-screen app shell in
+  the app's flat style (hairlines, no cards) — a summary strip, one ruled row
+  per repository (state rule: accent = changes, danger = unreadable), an app
+  bar with branch, one-thumb Fetch/Pull/Push/Stash, bottom navigation (side
+  rail on wide pages). Text and rows scale up on the maximized page
+  (`LocalGitFull`), including the commit/diff/file drill-downs.
   Maximized is detected by page height, so portrait phones get it too (3.2.0).
 - **Workspace** (the eight tabs) — Overview, Changes,
   History, Branches, Files, Remotes, Repo, GitHub.
@@ -76,6 +79,6 @@ workstation (3.1.0 supersedes a parallel 3.0.0 build).
 
 ```bash
 ./gradlew :plugins:git:assembleDebug :plugins:git:testDebugUnitTest
-tools/build-plugin.sh git 3.2.1               # build + dex to releases/git/3.2.1/plugin.jar
+tools/build-plugin.sh git 3.3.0               # build + dex to releases/git/3.3.0/plugin.jar
 tools/build-plugin.sh git 3.0.1 --update-catalog   # publish a new version + pin sha256 in catalog.json
 ```
