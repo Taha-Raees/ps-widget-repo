@@ -15,6 +15,20 @@
       }
     },
     {
+      "id": "network",
+      "name": "Network",
+      "summary": "SSH hosts, keys, tunnels, folder sharing and connectivity checks for the Linux guest",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "widgets/network.json",
+      "plugin": {
+        "className": "app.pocketshell.widget.network.NetworkPlugin",
+        "dex": "releases/network/1.0.0/plugin.jar",
+        "sha256": "fd6fdda8bcdace99832c52a4fb7e94de465cd9961b09c9f89e5abec982270d72"
+      }
+    },
+    {
       "id": "ssh",
       "name": "SSH",
       "summary": "Saved SSH hosts in the Linux guest's ~/.ssh/config and live ssh client processes",
