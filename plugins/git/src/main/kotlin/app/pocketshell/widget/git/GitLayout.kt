@@ -6,7 +6,7 @@ package app.pocketshell.widget.git
  *
  *   COMPACT  a phone card: one-line rows, no paths, no status header.
  *   ROOMY    a large card: paths, sublines, the status header, scroll.
- *   FULL     the maximized page: the workstation — enough height for the
+ *   FULL     the maximized page (GitStudio.kt — its own full-screen shell): the workstation — enough height for the
  *            repository workspace's tab bar and its content together, and
  *            (on wide pages) for the dashboard's list to sit beside the
  *            workspace.
@@ -39,8 +39,24 @@ internal enum class GitLayout(
         const val DETAIL_MAX_ENTRIES_COMPACT = 8
         const val DETAIL_MAX_ENTRIES_ROOMY = 24
 
+        /** Narrowest page the Studio shell is laid out for (a small phone). */
+        const val FULL_MIN_WIDTH_DP = 320f
+
+        /** A landscape phone page: wide, but under [FULL_MIN_HEIGHT_DP] tall. */
+        const val FULL_LANDSCAPE_MIN_HEIGHT_DP = 300f
+
+        /** Side navigation rail instead of the bottom bar from this width. */
+        fun usesSideRail(widthDp: Float): Boolean = widthDp >= WORKSPACE_MIN_WIDTH_DP
+
+        /**
+         * FULL is decided by HEIGHT first: a portrait phone page is only
+         * ~410dp wide (under [ROOMY_MIN_WIDTH_DP]) yet ~800dp tall, and a
+         * card is never that tall — so width alone must not demote the
+         * maximized page to the card hierarchy.
+         */
         fun from(widthDp: Float, heightDp: Float): GitLayout = when {
-            widthDp >= ROOMY_MIN_WIDTH_DP && heightDp >= FULL_MIN_HEIGHT_DP -> FULL
+            widthDp >= FULL_MIN_WIDTH_DP && heightDp >= FULL_MIN_HEIGHT_DP -> FULL
+            widthDp >= WORKSPACE_MIN_WIDTH_DP && heightDp >= FULL_LANDSCAPE_MIN_HEIGHT_DP -> FULL
             widthDp >= ROOMY_MIN_WIDTH_DP && heightDp >= ROOMY_MIN_HEIGHT_DP -> ROOMY
             else -> COMPACT
         }

@@ -380,17 +380,32 @@ internal fun GitWorkspace(
                 .weight(1f)
                 .verticalScroll(rememberScrollState()),
         ) {
-            when (tab) {
-                RepoTab.OVERVIEW -> OverviewTab(repo, onOpenCommit = onOpenCommit, onOpenTerminal = onOpenTerminal)
-                RepoTab.CHANGES -> ChangesTab(repo, state, onOpenDiff, onOp, onOpenTerminal)
-                RepoTab.HISTORY -> HistoryTab(repo, state, onOpenCommit)
-                RepoTab.BRANCHES -> BranchesTab(repo, state, onOp)
-                RepoTab.FILES -> FilesTab(repo, state, onOpenDiff, onOpenFile)
-                RepoTab.REMOTES -> RemotesTab(repo, state, onOp)
-                RepoTab.REPO -> RepositoryTab(repo, state, onOp)
-                RepoTab.HOST -> GitGitHubTab(repo, state, onOp, onOpenTerminal)
-            }
+            WorkspaceTabBody(repo, tab, state, onOpenDiff, onOpenCommit, onOpenFile, onOp, onOpenTerminal)
         }
+    }
+}
+
+/** One tab's content — shared by the card workspace and the Studio shell. */
+@Composable
+internal fun WorkspaceTabBody(
+    repo: RepoSnapshot,
+    tab: RepoTab,
+    state: GitState,
+    onOpenDiff: (DiffTarget, String) -> Unit,
+    onOpenCommit: (String) -> Unit,
+    onOpenFile: (String) -> Unit,
+    onOp: (GitOp) -> Unit,
+    onOpenTerminal: () -> Unit,
+) {
+    when (tab) {
+        RepoTab.OVERVIEW -> OverviewTab(repo, onOpenCommit = onOpenCommit, onOpenTerminal = onOpenTerminal)
+        RepoTab.CHANGES -> ChangesTab(repo, state, onOpenDiff, onOp, onOpenTerminal)
+        RepoTab.HISTORY -> HistoryTab(repo, state, onOpenCommit)
+        RepoTab.BRANCHES -> BranchesTab(repo, state, onOp)
+        RepoTab.FILES -> FilesTab(repo, state, onOpenDiff, onOpenFile)
+        RepoTab.REMOTES -> RemotesTab(repo, state, onOp)
+        RepoTab.REPO -> RepositoryTab(repo, state, onOp)
+        RepoTab.HOST -> GitGitHubTab(repo, state, onOp, onOpenTerminal)
     }
 }
 

@@ -166,7 +166,16 @@ object GitApp : HomeApplication() {
             }
 
             when (val top = state.stack.lastOrNull()) {
-                null -> GitDashboard(
+                null -> if (layout.isWorkspace) StudioHome(
+                    ui = state.ui,
+                    repos = repos,
+                    lastScanAtMs = state.probe.lastScanAtMs,
+                    onRefresh = { state.refreshTick++ },
+                    onOpenWorkspace = { repo -> state.open(Screen.Workspace(repo.path)) },
+                    onOpenTerminal = { context.nav.openTerminal() },
+                    onOpenLinuxShell = { context.nav.openLinuxShell() },
+                    onOpenDiagnostics = { context.nav.openDiagnostics() },
+                ) else GitDashboard(
                     ui = state.ui,
                     repos = repos,
                     layout = layout,
@@ -183,24 +192,45 @@ object GitApp : HomeApplication() {
                     onOpenDiagnostics = { context.nav.openDiagnostics() },
                 )
 
-                is Screen.Workspace -> GitWorkspace(
-                    repo = state.repo(top.repoPath),
-                    tab = top.tab,
-                    state = state,
-                    onBack = { state.back() },
-                    onTab = { tab -> state.replaceTop(top.copy(tab = tab)) },
-                    onOpenDiff = { target, title ->
-                        state.open(Screen.DiffPage(repoPath = top.repoPath, target = target, title = title))
-                    },
-                    onOpenCommit = { hash ->
-                        state.open(Screen.CommitPage(repoPath = top.repoPath, hash = hash))
-                    },
-                    onOpenFile = { path ->
-                        state.open(Screen.FilePage(repoPath = top.repoPath, path = path))
-                    },
-                    onOp = { op -> state.requestOp(op, top.repoPath) },
-                    onOpenTerminal = { context.nav.openTerminal() },
-                )
+                is Screen.Workspace -> if (layout.isWorkspace) {
+                    StudioWorkspace(
+                        repo = state.repo(top.repoPath),
+                        tab = top.tab,
+                        state = state,
+                        onBack = { state.back() },
+                        onTab = { tab -> state.replaceTop(top.copy(tab = tab)) },
+                        onOpenDiff = { target, title ->
+                            state.open(Screen.DiffPage(repoPath = top.repoPath, target = target, title = title))
+                        },
+                        onOpenCommit = { hash ->
+                            state.open(Screen.CommitPage(repoPath = top.repoPath, hash = hash))
+                        },
+                        onOpenFile = { path ->
+                            state.open(Screen.FilePage(repoPath = top.repoPath, path = path))
+                        },
+                        onOp = { op -> state.requestOp(op, top.repoPath) },
+                        onOpenTerminal = { context.nav.openTerminal() },
+                    )
+                } else {
+                    GitWorkspace(
+                        repo = state.repo(top.repoPath),
+                        tab = top.tab,
+                        state = state,
+                        onBack = { state.back() },
+                        onTab = { tab -> state.replaceTop(top.copy(tab = tab)) },
+                        onOpenDiff = { target, title ->
+                            state.open(Screen.DiffPage(repoPath = top.repoPath, target = target, title = title))
+                        },
+                        onOpenCommit = { hash ->
+                            state.open(Screen.CommitPage(repoPath = top.repoPath, hash = hash))
+                        },
+                        onOpenFile = { path ->
+                            state.open(Screen.FilePage(repoPath = top.repoPath, path = path))
+                        },
+                        onOp = { op -> state.requestOp(op, top.repoPath) },
+                        onOpenTerminal = { context.nav.openTerminal() },
+                    )
+                }
 
                 is Screen.DiffPage -> GitDiffScreen(
                     state = state,

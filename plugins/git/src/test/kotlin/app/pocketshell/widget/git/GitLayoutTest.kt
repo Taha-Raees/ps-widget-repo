@@ -39,7 +39,7 @@ class GitLayoutTest {
         // Wide but short (landscape phone) → COMPACT hierarchy.
         assertEquals(GitLayout.COMPACT, GitLayout.from(680f, 180f))
         assertEquals(GitLayout.COMPACT, GitLayout.from(680f, 199.9f))
-        // Tall but narrow (portrait phone) → COMPACT hierarchy.
+        // Short and narrow (a phone card) → COMPACT hierarchy.
         assertEquals(GitLayout.COMPACT, GitLayout.from(390f, 300f))
     }
 
@@ -48,5 +48,25 @@ class GitLayoutTest {
         assertEquals(GitLayout.ROOMY, GitLayout.from(420f, 200f))
         assertEquals(GitLayout.COMPACT, GitLayout.from(419.9f, 200f))
         assertEquals(GitLayout.COMPACT, GitLayout.from(420f, 199.9f))
+    }
+
+    @Test
+    fun `a maximized portrait phone page is FULL even under 420dp wide`() {
+        assertEquals(GitLayout.FULL, GitLayout.from(411f, 800f))
+        assertEquals(GitLayout.FULL, GitLayout.from(320f, 400f))
+        assertEquals(GitLayout.COMPACT, GitLayout.from(319.9f, 800f))
+        assertTrue(GitLayout.from(411f, 800f).isWorkspace)
+    }
+
+    @Test
+    fun `a maximized landscape phone page is FULL, a wide card is not`() {
+        assertEquals(GitLayout.FULL, GitLayout.from(850f, 380f))
+        assertEquals(GitLayout.ROOMY, GitLayout.from(680f, 251f))
+    }
+
+    @Test
+    fun `the side rail needs a wide page`() {
+        assertFalse(GitLayout.usesSideRail(411f))
+        assertTrue(GitLayout.usesSideRail(600f))
     }
 }
