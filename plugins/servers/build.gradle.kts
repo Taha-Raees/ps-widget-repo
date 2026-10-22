@@ -46,6 +46,9 @@ dependencies {
     compileOnly(libs.androidx.lifecycle.runtime.compose)
     // BackHandler rides androidx.activity.compose (what the host ships).
     compileOnly(libs.androidx.activity.compose)
+    // The task-manager shell's nav + action icons ride the extended set
+    // (what the host app itself ships, and the git plugin already uses).
+    compileOnly(libs.compose.material.icons.extended)
     // The tick loop's Dispatchers / withContext / coroutineScope+async.
     compileOnly(libs.kotlinx.coroutines.core)
 

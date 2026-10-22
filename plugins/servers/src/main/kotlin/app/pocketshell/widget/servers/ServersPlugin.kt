@@ -13,11 +13,17 @@ import app.pocketshell.widget.plugin.WidgetPlugin
  * took): the six-line proc.net.listen card becomes the server monitor —
  * verified endpoints, HTTP checks with session response history, process
  * facts, system health, and the stop action in the maximized tier.
+ *
+ * 2.1.0 widens "listening ports" to "what is running on this device":
+ * background processes (Gradle daemons, watchers), session keepers (tmux,
+ * screen), terminal sessions, and — as a kernel fact — which of them
+ * outlive closing the terminal. Both the card and the maximized task
+ * manager carry it; stop / force-kill live in the maximized tier.
  */
 class ServersPlugin : WidgetPlugin {
 
     override val pluginId: String = "servers"
-    override val pluginVersion: String = "2.0.0"
+    override val pluginVersion: String = "2.1.0"
 
     override fun create(androidContext: Context): HomeApplication = ServersApp
 }

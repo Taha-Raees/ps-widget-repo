@@ -10,11 +10,11 @@ package app.pocketshell.widget.servers
  *            HTTP chips, no history. Everything needed immediately.
  *   ROOMY    a large card: adds the per-server cwd line, the HTTP status
  *            chip + latency and the session beat strip. Still glanceable.
- *   FULL     the maximized page: the desktop-class monitor — system
- *            health strip, search, sort, per-endpoint response history
- *            with session uptime, process facts (PID / CPU / RSS / argv)
- *            and the stop action. Enough height for the dashboard and the
- *            detail page together, and (on wide pages) for the list to sit
+ *   FULL     the maximized page: the desktop-class task manager
+ *            (ServersStudio.kt) — OVERVIEW / SERVERS / BACKGROUND /
+ *            SESSIONS behind a bottom bar (a side rail when wide), device
+ *            health, search, sort, response history, process facts, and
+ *            the stop / force-kill actions. On wide pages the list sits
  *            beside the detail — the two-pane workstation shape.
  *
  * The SAME composable is the card and the maximized page (the host's
@@ -30,6 +30,8 @@ internal enum class ServersLayout(
     val showsSystemStrip: Boolean,
     val showsProcessFacts: Boolean,
     val showsStopAction: Boolean,
+    /** How many rows the card shows before "+N more" (FULL scrolls, so unbounded). */
+    val cardRows: Int,
 ) {
     COMPACT(
         showsCwd = false,
@@ -40,6 +42,7 @@ internal enum class ServersLayout(
         showsSystemStrip = false,
         showsProcessFacts = false,
         showsStopAction = false,
+        cardRows = 4,
     ),
     ROOMY(
         showsCwd = true,
@@ -50,6 +53,7 @@ internal enum class ServersLayout(
         showsSystemStrip = false,
         showsProcessFacts = false,
         showsStopAction = false,
+        cardRows = 7,
     ),
     FULL(
         showsCwd = true,
@@ -60,6 +64,7 @@ internal enum class ServersLayout(
         showsSystemStrip = true,
         showsProcessFacts = true,
         showsStopAction = true,
+        cardRows = Int.MAX_VALUE,
     );
 
     /** FULL renders the monitor chrome (system strip, search); cards do not. */
@@ -75,8 +80,24 @@ internal enum class ServersLayout(
         /** Wide enough for the server list to sit beside the detail page. */
         const val WORKSPACE_MIN_WIDTH_DP = 600f
 
+        /** Narrowest page the task-manager shell is laid out for (a small phone). */
+        const val FULL_MIN_WIDTH_DP = 320f
+
+        /** A landscape phone page: wide, but under [FULL_MIN_HEIGHT_DP] tall. */
+        const val FULL_LANDSCAPE_MIN_HEIGHT_DP = 300f
+
+        /** Side navigation rail instead of the bottom bar from this width. */
+        fun usesSideRail(widthDp: Float): Boolean = widthDp >= WORKSPACE_MIN_WIDTH_DP
+
+        /**
+         * FULL is decided by HEIGHT first: a portrait phone page is only
+         * ~410dp wide (under [ROOMY_MIN_WIDTH_DP]) yet ~800dp tall, and a
+         * card is never that tall — so width alone must not demote the
+         * maximized page to the card hierarchy.
+         */
         fun from(widthDp: Float, heightDp: Float): ServersLayout = when {
-            widthDp >= ROOMY_MIN_WIDTH_DP && heightDp >= FULL_MIN_HEIGHT_DP -> FULL
+            widthDp >= FULL_MIN_WIDTH_DP && heightDp >= FULL_MIN_HEIGHT_DP -> FULL
+            widthDp >= WORKSPACE_MIN_WIDTH_DP && heightDp >= FULL_LANDSCAPE_MIN_HEIGHT_DP -> FULL
             widthDp >= ROOMY_MIN_WIDTH_DP && heightDp >= ROOMY_MIN_HEIGHT_DP -> ROOMY
             else -> COMPACT
         }

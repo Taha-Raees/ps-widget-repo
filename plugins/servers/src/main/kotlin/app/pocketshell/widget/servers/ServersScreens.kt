@@ -45,159 +45,81 @@ import kotlinx.coroutines.delay
  * produced; every honest state is stated, never substituted.
  */
 
-/** The whole application: routes card + maximized, dashboard + detail. */
+/** Everything the screens may ask the host or the state to do — lambdas only, no state. */
+internal class ServersActions(
+    val onRefresh: () -> Unit,
+    val onTogglePause: () -> Unit,
+    val onOpenTerminal: () -> Unit,
+    val onOpenLinuxShell: () -> Unit,
+    val onOpenDiagnostics: () -> Unit,
+    val onOpenCompanion: (Int) -> Unit,
+    val onSignalServer: (ServerInfo, ServersOps.Signal) -> Unit,
+    val onSignalProcess: (ProcEntry, ServersOps.Signal) -> Unit,
+)
+
+/** The whole application: the card (COMPACT/ROOMY) or the maximized task manager (FULL). */
 @Composable
 internal fun ServersScreens(
-    ui: ServersUi,
+    state: ServersState,
     layout: ServersLayout,
     maxWidthDp: Float,
-    servers: List<ServerInfo>,
-    system: SystemStrip?,
-    httpByPort: Map<Int, HttpResult>,
-    beatsByPort: Map<Int, BeatHistory>,
-    factsByPort: Map<Int, ProcessFacts>,
-    paused: Boolean,
-    query: String,
-    sort: SortMode,
-    selected: ServerInfo?,
-    lastScanAtMs: Long,
-    onRefresh: () -> Unit,
-    onTogglePause: () -> Unit,
-    onQueryChange: (String) -> Unit,
-    onSortChange: (SortMode) -> Unit,
-    onSelect: (Int) -> Unit,
-    onBack: () -> Unit,
-    onOpenTerminal: () -> Unit,
-    onOpenLinuxShell: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
-    onOpenCompanion: (Int) -> Unit,
-    onStopRequest: (ServerInfo) -> Unit,
+    actions: ServersActions,
 ) {
+    val servers = (state.ui as? ServersUi.Ready)?.servers.orEmpty()
     when {
-        // The MAXIMIZED monitor: dashboard + detail, two-pane when wide.
-        layout.isMonitor -> if (ServersLayout.twoPane(maxWidthDp)) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    Dashboard(
-                        ui = ui,
-                        layout = layout,
-                        servers = servers,
-                        system = system,
-                        httpByPort = httpByPort,
-                        beatsByPort = beatsByPort,
-                        paused = paused,
-                        query = query,
-                        sort = sort,
-                        lastScanAtMs = lastScanAtMs,
-                        selectedPort = selected?.port,
-                        onRefresh = onRefresh,
-                        onTogglePause = onTogglePause,
-                        onQueryChange = onQueryChange,
-                        onSortChange = onSortChange,
-                        onSelect = onSelect,
-                        onOpenLinuxShell = onOpenLinuxShell,
-                        onOpenDiagnostics = onOpenDiagnostics,
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    if (selected != null) {
-                        ServerDetail(
-                            server = selected,
-                            layout = layout,
-                            http = httpByPort[selected.port],
-                            beats = beatsByPort[selected.port]?.beats().orEmpty(),
-                            facts = factsByPort[selected.port],
-                            onBack = onBack,
-                            onOpenTerminal = onOpenTerminal,
-                            onOpenCompanion = { onOpenCompanion(selected.port) },
-                            onStopRequest = { onStopRequest(selected) },
-                        )
-                    } else {
-                        DetailPlaceholder()
-                    }
-                }
-            }
-        } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                if (selected != null) {
-                    ServerDetail(
-                        server = selected,
-                        layout = layout,
-                        http = httpByPort[selected.port],
-                        beats = beatsByPort[selected.port]?.beats().orEmpty(),
-                        facts = factsByPort[selected.port],
-                        onBack = onBack,
-                        onOpenTerminal = onOpenTerminal,
-                        onOpenCompanion = { onOpenCompanion(selected.port) },
-                        onStopRequest = { onStopRequest(selected) },
-                    )
-                } else {
-                    Dashboard(
-                        ui = ui,
-                        layout = layout,
-                        servers = servers,
-                        system = system,
-                        httpByPort = httpByPort,
-                        beatsByPort = beatsByPort,
-                        paused = paused,
-                        query = query,
-                        sort = sort,
-                        lastScanAtMs = lastScanAtMs,
-                        selectedPort = null,
-                        onRefresh = onRefresh,
-                        onTogglePause = onTogglePause,
-                        onQueryChange = onQueryChange,
-                        onSortChange = onSortChange,
-                        onSelect = onSelect,
-                        onOpenLinuxShell = onOpenLinuxShell,
-                        onOpenDiagnostics = onOpenDiagnostics,
-                    )
-                }
+        layout.isMonitor -> ServersStudio(
+            state = state,
+            layout = layout,
+            maxWidthDp = maxWidthDp,
+            servers = servers,
+            actions = actions,
+        )
+        else -> {
+            val selectedServer = state.selectedPort?.let { port -> servers.firstOrNull { it.port == port } }
+            val selectedEntry = state.selectedPid?.let { state.procView.byPid[it] }
+            when {
+                // The CARD: overview or an in-card detail — the one-card pattern.
+                selectedServer != null -> CardDetail(
+                    server = selectedServer,
+                    proc = selectedServer.pid?.let { state.procView.byPid[it] },
+                    nowMs = state.procAtMs,
+                    onBack = { state.selectedPort = null },
+                    onOpenTerminal = actions.onOpenTerminal,
+                    onOpenCompanion = { actions.onOpenCompanion(selectedServer.port) },
+                )
+                selectedEntry != null -> CardProcDetail(
+                    entry = selectedEntry,
+                    procs = state.procView,
+                    nowMs = state.procAtMs,
+                    onBack = { state.selectedPid = null },
+                    onOpenTerminal = actions.onOpenTerminal,
+                )
+                else -> CardOverview(
+                    ui = state.ui,
+                    layout = layout,
+                    servers = servers,
+                    procs = state.procView,
+                    nowMs = state.procAtMs,
+                    httpByPort = state.httpByPort,
+                    beatsByPort = state.beatsByPort,
+                    onOpenServer = { state.selectedPort = it.port },
+                    onOpenProcess = { state.selectedPid = it.pid },
+                    onOpenLinuxShell = actions.onOpenLinuxShell,
+                    onOpenDiagnostics = actions.onOpenDiagnostics,
+                )
             }
         }
-        // The CARD: overview or in-card detail — the one-card pattern.
-        selected != null -> CardDetail(
-            server = selected,
-            onBack = onBack,
-            onOpenTerminal = onOpenTerminal,
-            onOpenCompanion = { onOpenCompanion(selected.port) },
-        )
-        else -> CardOverview(
-            ui = ui,
-            layout = layout,
-            servers = servers,
-            httpByPort = httpByPort,
-            beatsByPort = beatsByPort,
-            onOpenDetail = { onSelect(it.port) },
-            onOpenLinuxShell = onOpenLinuxShell,
-            onOpenDiagnostics = onOpenDiagnostics,
-        )
     }
 }
 
 // ------------------------------------------------------------- dashboard
 
+/** The SERVERS tab's list: search, sort, the endpoint table, the honest state line. */
 @Composable
-private fun Dashboard(
+internal fun Dashboard(
     ui: ServersUi,
     layout: ServersLayout,
     servers: List<ServerInfo>,
-    system: SystemStrip?,
     httpByPort: Map<Int, HttpResult>,
     beatsByPort: Map<Int, BeatHistory>,
     paused: Boolean,
@@ -205,8 +127,6 @@ private fun Dashboard(
     sort: SortMode,
     lastScanAtMs: Long,
     selectedPort: Int?,
-    onRefresh: () -> Unit,
-    onTogglePause: () -> Unit,
     onQueryChange: (String) -> Unit,
     onSortChange: (SortMode) -> Unit,
     onSelect: (Int) -> Unit,
@@ -214,72 +134,8 @@ private fun Dashboard(
     onOpenDiagnostics: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header — title, live count, pause + refresh.
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            Text(
-                text = "Servers",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = HomeTokens.textPrimary,
-            )
-            Spacer(Modifier.weight(1f))
-            if (servers.isNotEmpty()) {
-                MonoText(text = "${servers.size} UP", color = HomeTokens.accent, fontSize = 11)
-                Spacer(Modifier.width(12.dp))
-            }
-            MonoText(
-                text = if (paused) "▶" else "⏸",
-                color = HomeTokens.textDim,
-                fontSize = 13,
-                modifier = Modifier.clickable(
-                    role = Role.Button,
-                    onClickLabel = if (paused) "Resume auto-refresh" else "Pause auto-refresh",
-                ) { onTogglePause() },
-            )
-            Spacer(Modifier.width(12.dp))
-            MonoText(
-                text = "↻",
-                color = HomeTokens.accent,
-                fontSize = 13,
-                modifier = Modifier.clickable(role = Role.Button, onClickLabel = "Refresh now") { onRefresh() },
-            )
-        }
-
-        // The system health strip — maximized only, honestly labelled.
-        if (layout.showsSystemStrip && system != null) {
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(HomeTokens.surfaceRaised, RoundedCornerShape(8.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                StatChip(
-                    "LOAD",
-                    system.load?.let {
-                        ServersPresentation.formatLoad(it.one) + " " +
-                            ServersPresentation.formatLoad(it.five) + " " +
-                            ServersPresentation.formatLoad(it.fifteen)
-                    } ?: "—",
-                )
-                StatChip(
-                    "MEM",
-                    system.mem?.let {
-                        ServersPresentation.formatKb(it.usedKb) + " / " +
-                            ServersPresentation.formatKb(it.totalKb)
-                    } ?: "—",
-                )
-                StatChip("DISK", ServersPresentation.formatFraction(system.diskUsedFrac))
-                StatChip("UPTIME", system.uptimeSec?.let { ServersPresentation.formatUptime(it) } ?: "—")
-            }
-            Spacer(Modifier.height(4.dp))
-            SectionLabel("device load, memory, uptime · rootfs disk")
-        }
-
         // Search + sort — the maximized dashboard's controls.
         if (layout.showsSearch) {
-            Spacer(Modifier.height(8.dp))
             SearchField(value = query, onChange = onQueryChange)
             Spacer(Modifier.height(6.dp))
             Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
@@ -435,7 +291,7 @@ private fun ServerRow(
 
 /** The HTTP status chip: the answered code in its band's color, or the failure. */
 @Composable
-private fun HttpChip(http: HttpResult?) {
+internal fun HttpChip(http: HttpResult?) {
     val (text, color) = when (http) {
         null -> "—" to HomeTokens.textDim
         is HttpResult.Answered -> when (HttpChecker.band(http.code)) {
@@ -459,16 +315,18 @@ private fun HttpChip(http: HttpResult?) {
 // ---------------------------------------------------------------- detail
 
 @Composable
-private fun ServerDetail(
+internal fun ServerDetail(
     server: ServerInfo,
     layout: ServersLayout,
     http: HttpResult?,
     beats: List<BeatHistory.Beat>,
     facts: ProcessFacts?,
+    /** The process record for this listener's pid — carries the survive-the-terminal fact. */
+    proc: ProcEntry?,
     onBack: () -> Unit,
     onOpenTerminal: () -> Unit,
     onOpenCompanion: () -> Unit,
-    onStopRequest: () -> Unit,
+    onSignal: (ServersOps.Signal) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         BackHeader(onBack = onBack)
@@ -525,13 +383,22 @@ private fun ServerDetail(
                 KeyValue("PID", facts.pid.toString())
                 KeyValue("CPU", ServersPresentation.formatCpu(facts.cpuPercent))
                 KeyValue("RSS", ServersPresentation.formatBytes(facts.rssBytes))
-                facts.argv?.let { KeyValue("ARGV", it) }
+                facts.argv?.let { KeyValue("ARGV", it, maxLines = 6) }
             } else {
                 MonoText(
                     text = server.pid?.let { "PID $it" } ?: "owner unknown",
                     color = HomeTokens.textDim,
                     fontSize = 10,
                 )
+            }
+            proc?.let { p ->
+                KeyValue(
+                    "SURVIVES",
+                    if (p.survival == Survival.ATTACHED) "NO — ${p.survival.explanation}" else "YES — ${p.survival.explanation}",
+                    maxLines = 3,
+                    valueColor = if (p.survival == Survival.ATTACHED) HomeTokens.textPrimary else HomeTokens.accent,
+                )
+                ProcPresentation.memorySplit(p)?.let { KeyValue("SWAP", it, maxLines = 2) }
             }
             server.cwd?.let { cwd ->
                 KeyValue("CWD", ServersPresentation.displayCwd(cwd, LocalContext.current))
@@ -558,7 +425,9 @@ private fun ServerDetail(
             ActionButton("COMPANION", onOpenCompanion)
             if (layout.showsStopAction) {
                 Spacer(Modifier.width(8.dp))
-                ActionButton("STOP", onStopRequest)
+                ActionButton("STOP") { onSignal(ServersOps.Signal.TERM) }
+                Spacer(Modifier.width(8.dp))
+                ActionButton("FORCE KILL") { onSignal(ServersOps.Signal.KILL) }
             }
         }
     }
@@ -592,183 +461,14 @@ private fun CopyUrlRow(port: Int) {
 
 /** The maximized dashboard's idle pane — what the detail side is for. */
 @Composable
-private fun DetailPlaceholder() {
+internal fun DetailPlaceholder(text: String = "Select a server to inspect its endpoint, response history and process.") {
     Column(modifier = Modifier.fillMaxSize()) {
         SectionLabel("DETAIL")
         Spacer(Modifier.height(6.dp))
         MonoText(
-            text = "Select a server to inspect its endpoint, response history and process.",
+            text = text,
             color = HomeTokens.textDim,
             fontSize = 11,
         )
-    }
-}
-
-// ------------------------------------------------------------ card screens
-
-@Composable
-private fun CardOverview(
-    ui: ServersUi,
-    layout: ServersLayout,
-    servers: List<ServerInfo>,
-    httpByPort: Map<Int, HttpResult>,
-    beatsByPort: Map<Int, BeatHistory>,
-    onOpenDetail: (ServerInfo) -> Unit,
-    onOpenLinuxShell: () -> Unit,
-    onOpenDiagnostics: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            Text(
-                text = "Servers",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = HomeTokens.textPrimary,
-            )
-            Spacer(Modifier.weight(1f))
-            if (servers.isNotEmpty() && layout == ServersLayout.COMPACT) {
-                MonoText(text = "${servers.size} up", color = HomeTokens.textDim, fontSize = 11)
-            }
-        }
-        if (layout.showsStatusHeader && servers.isNotEmpty()) {
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StatusDot(ok = true)
-                Spacer(Modifier.width(8.dp))
-                MonoText(text = "${servers.size} RUNNING", color = HomeTokens.accent, fontSize = 11)
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        if (servers.isNotEmpty()) {
-            servers.forEachIndexed { index, server ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(
-                            role = Role.Button,
-                            onClickLabel = "Server details :${server.port}",
-                        ) { onOpenDetail(server) }
-                        .padding(vertical = 6.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        StatusDot(ok = httpByPort[server.port] !is HttpResult.Failed)
-                        Spacer(Modifier.width(8.dp))
-                        MonoText(text = ":${server.port}  ${server.displayName}")
-                        if (layout.showsHttpChip) {
-                            Spacer(Modifier.weight(1f))
-                            HttpChip(httpByPort[server.port])
-                        }
-                    }
-                    if (layout.showsCwd) server.cwd?.let { cwd ->
-                        MonoText(
-                            text = ServersPresentation.displayCwd(cwd, LocalContext.current),
-                            color = HomeTokens.textDim,
-                            fontSize = 10,
-                            modifier = Modifier.padding(start = 14.dp, top = 1.dp),
-                        )
-                    }
-                    if (layout.showsBeats) {
-                        val beats = beatsByPort[server.port]?.beats().orEmpty()
-                        if (beats.isNotEmpty()) {
-                            Spacer(Modifier.height(3.dp))
-                            BeatStrip(beats = beats)
-                        }
-                    }
-                }
-                if (index != servers.lastIndex) {
-                    HorizontalDivider(color = HomeTokens.hairline.copy(alpha = 0.6f))
-                }
-            }
-        } else {
-            Spacer(Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(4.dp))
-        val stateLine = when {
-            ui is ServersUi.Probing -> "Looking…"
-            ui is ServersUi.Unavailable -> "Linux not ready"
-            ui is ServersUi.ProbeUnavailable -> "Probes unavailable"
-            servers.isEmpty() -> "Nothing listening"
-            else -> "Local listeners"
-        }
-        MonoText(
-            text = stateLine,
-            color = if (servers.isNotEmpty()) HomeTokens.accent else HomeTokens.textDim,
-            fontSize = 11,
-        )
-        if (ui is ServersUi.Ready && servers.isEmpty()) {
-            Text(
-                text = "Start a server in a terminal — it appears here when it listens.",
-                style = MaterialTheme.typography.bodySmall,
-                color = HomeTokens.textDim,
-                modifier = Modifier.padding(top = 2.dp),
-            )
-            ActionButton("OPEN LINUX", onOpenLinuxShell)
-        }
-        if (ui is ServersUi.Unavailable || ui is ServersUi.ProbeUnavailable) {
-            ActionButton("DIAGNOSTICS", onOpenDiagnostics)
-        }
-    }
-}
-
-@Composable
-private fun CardDetail(
-    server: ServerInfo,
-    onBack: () -> Unit,
-    onOpenTerminal: () -> Unit,
-    onOpenCompanion: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState()),
-    ) {
-        BackHeader(onBack = onBack)
-        MonoText(
-            text = "${server.displayName} :${server.port}",
-            fontSize = 16,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(2.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            StatusDot(ok = true)
-            Spacer(Modifier.width(8.dp))
-            MonoText(text = "RUNNING", color = HomeTokens.runningGreen, fontSize = 10)
-        }
-        Spacer(Modifier.height(4.dp))
-        MonoText(text = "127.0.0.1:${server.port}", fontSize = 12)
-        server.cwd?.let { cwd ->
-            MonoText(
-                text = ServersPresentation.displayCwd(cwd, LocalContext.current),
-                color = HomeTokens.textDim,
-                fontSize = 10,
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        if (server.pid != null) {
-            MonoText(
-                text = "PID ${server.pid} · ${server.processName ?: "unknown"}",
-                color = HomeTokens.textDim,
-                fontSize = 10,
-            )
-        }
-        MonoText(
-            text = when (server.attribution) {
-                ServerInfo.Attribution.ACCEPTOR_MATCH ->
-                    "verified by connecting; this process accepted the connection"
-                ServerInfo.Attribution.CMDLINE_MATCH ->
-                    "verified by connecting; this process names the port and owns sockets"
-                ServerInfo.Attribution.TABLE_MATCH ->
-                    "verified by connecting; this process owns the listening socket"
-            },
-            color = HomeTokens.textDim,
-            fontSize = 9,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-        Spacer(Modifier.height(4.dp))
-        Row {
-            ActionButton("TERMINAL", onOpenTerminal)
-            Spacer(Modifier.width(8.dp))
-            ActionButton("COMPANION", onOpenCompanion)
-        }
     }
 }

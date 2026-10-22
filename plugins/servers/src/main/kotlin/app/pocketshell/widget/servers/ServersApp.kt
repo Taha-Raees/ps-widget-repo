@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -18,7 +19,6 @@ import androidx.lifecycle.Lifecycle
 import app.pocketshell.packages.ExecResult
 import app.pocketshell.packages.ProcessBuilderGuestCommandRunner
 import app.pocketshell.runtime.GuestExecutionProfile
-import app.pocketshell.runtime.RuntimeProcessLauncher
 import app.pocketshell.runtime.RuntimeState
 import app.pocketshell.runtime.RuntimeStorage
 import app.pocketshell.terminal.ShellEnvironment
@@ -27,6 +27,7 @@ import app.pocketshell.widget.HomeApplication
 import app.pocketshell.widget.HomeAppSpec
 import app.pocketshell.widget.probe.ServerInfo
 import app.pocketshell.widget.probe.ServerProbe
+import app.pocketshell.widget.servers.ServersOps.Signal
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -42,19 +43,21 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
- * SERVERS — the server monitor, as a Home Application plugin.
+ * SERVERS — what is running on this device, as a Home Application plugin.
  *
  * What it is: the v1 manifest card (verified listeners, six lines)
- * graduated into the three-tier monitor:
+ * graduated into a process-aware monitor:
  *
- *   CARD (COMPACT/ROOMY)   the at-a-glance answer — N up, verified rows,
- *                          and (roomy) each endpoint's HTTP chip + beat
- *                          strip. Everything needed immediately.
- *   MAXIMIZED (FULL)       the desktop-class monitor — system health
- *                          strip, search + sort, response history with
- *                          session uptime, process facts, and the stop
- *                          action. The extra features live here, one
- *                          toggle away.
+ *   CARD (COMPACT/ROOMY)   the at-a-glance answer — "N up · M bg · K ses",
+ *                          servers, session keepers and background
+ *                          processes as one-line rows, and the headline
+ *                          fact: how many OUTLIVE THE TERMINAL.
+ *   MAXIMIZED (FULL)       a task manager (ServersStudio.kt): OVERVIEW,
+ *                          SERVERS (endpoints, HTTP checks, response
+ *                          history), BACKGROUND (Gradle daemons, watchers
+ *                          — anything detached), SESSIONS (terminals and
+ *                          tmux/screen), with search, sort, process facts
+ *                          and the stop / force-kill actions.
  *
  * Fact discipline (inherited, never invented):
  *   - endpoints come ONLY from the host's ServerProbe pipeline (a
@@ -63,20 +66,24 @@ import kotlinx.coroutines.withContext
  *   - HTTP checks are app-side GETs on the shared loopback (same netns),
  *     bounded in count, timeout and body; 3xx/4xx/5xx render as what
  *     they are, redirects are never followed;
- *   - process facts are the attributed owner's /proc files (own-UID,
- *     device-verifiably readable); CPU is a tick delta, RSS is stat's
- *     rss field — a first sighting says "—", not 0%;
+ *   - process facts are /proc files of the app's own UID (the kernel hides
+ *     the rest); CPU is a tick delta — a first sighting says "—", not 0%;
+ *     memory is resident + swapped (a big idle daemon often lives in swap);
+ *   - "outlives the terminal" is a kernel fact (no controlling tty, or
+ *     SIGHUP ignored) combined with "was reparented to init" — never a guess;
  *   - the system strip is labelled DEVICE: load/memory/uptime are the
  *     shared kernel's facts; the disk number is the rootfs image's.
  *
  * Cost discipline: the pid-set idle gate turns an idle card's tick into
- * one /proc readdir; HTTP checks are capped and parallel-bounded; a
- * paused monitor does nothing at all; the stop op is the ONLY guest exec.
+ * one /proc readdir; the process scan runs when the pid set changed, on
+ * every tick while the maximized page is visible, else every
+ * [PROC_SLOW_TICKS]th tick; HTTP checks are capped and parallel-bounded; a
+ * paused monitor does nothing at all; the signal op is the ONLY guest exec.
  *
  * This file owns the application object, the process-scoped state and
- * the exec seam. The screens live in ServersScreens, the shared controls
- * in ServersComponents, the pure rules in ServersProbe/HttpCheck/
- * ServersPresentation/ServersOps.
+ * the exec seam. The screens live in ServersScreens/ServersStudio, the
+ * shared controls in ServersComponents, the pure rules in ServersProbe/
+ * ServersProcesses/HttpCheck/ServersPresentation/ServersOps.
  */
 object ServersApp : HomeApplication() {
 
@@ -135,19 +142,27 @@ object ServersApp : HomeApplication() {
         // → forced rescan. Nothing optimistic in between.
         LaunchedEffect(state.stopTick) {
             val req = state.stopInFlight ?: return@LaunchedEffect
+            // Consume BEFORE running: this state outlives the composition, so an
+            // effect cancelled mid-exec (rotation, leaving Home) must never leave
+            // the request behind to fire a second kill when it restarts.
+            state.stopInFlight = null
             val outcome = withContext(Dispatchers.IO) { state.runStop(req) }
             state.stopOutcome = outcome
-            state.stopInFlight = null
             state.scan()
+            // kill exits 0 once the signal is SENT; only the rescan knows whether
+            // the same process is still there.
+            val stillThere = req.startTicks != null && state.procView.byPid[req.pid]?.rec?.startTicks == req.startTicks
+            if (outcome.ok && stillThere && state.stopOutcome === outcome) {
+                state.stopOutcome = outcome.copy(stillRunning = true)
+            }
         }
 
-        // The application owns its back: from a detail page back to the
-        // dashboard; only from the dashboard does back reach Home.
-        BackHandler(enabled = state.selectedPort != null) { state.selectedPort = null }
+        // The application owns its back: from a detail page back to its
+        // list; only from the list does back reach Home.
+        BackHandler(enabled = state.hasSelection) { state.clearSelection() }
 
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val layout = ServersLayout.from(maxWidth.value, maxHeight.value)
-            val servers = (state.ui as? ServersUi.Ready)?.servers.orEmpty()
 
             state.stopPending?.let { pending ->
                 StopConfirmDialog(
@@ -160,38 +175,32 @@ object ServersApp : HomeApplication() {
                 OutcomeBanner(outcome = outcome, onDismiss = { state.stopOutcome = null })
             }
 
-            val selected = state.selectedPort?.let { port -> servers.firstOrNull { it.port == port } }
+            // The maximized page re-scans processes every tick (CPU / memory must move).
+            SideEffect { state.detailed = layout.isMonitor }
+
             ServersScreens(
-                ui = state.ui,
+                state = state,
                 layout = layout,
                 maxWidthDp = maxWidth.value,
-                servers = servers,
-                system = state.system,
-                httpByPort = state.httpByPort,
-                beatsByPort = state.beatsByPort,
-                factsByPort = state.factsByPort,
-                paused = state.paused,
-                query = state.query,
-                sort = state.sort,
-                selected = selected,
-                lastScanAtMs = state.lastScanAtMs,
-                onRefresh = { state.refreshTick++ },
-                onTogglePause = { state.paused = !state.paused },
-                onQueryChange = { state.query = it },
-                onSortChange = { state.sort = it },
-                onSelect = { state.selectedPort = it },
-                onBack = { state.selectedPort = null },
-                onOpenTerminal = { context.nav.openTerminal() },
-                onOpenLinuxShell = { context.nav.openLinuxShell() },
-                onOpenDiagnostics = { context.nav.openDiagnostics() },
-                onOpenCompanion = { context.nav.openCompanion(ServerProbe.companionUrl(it)) },
-                onStopRequest = { state.requestStop(it) },
+                actions = ServersActions(
+                    onRefresh = { state.refreshTick++ },
+                    onTogglePause = { state.paused = !state.paused },
+                    onOpenTerminal = { context.nav.openTerminal() },
+                    onOpenLinuxShell = { context.nav.openLinuxShell() },
+                    onOpenDiagnostics = { context.nav.openDiagnostics() },
+                    onOpenCompanion = { context.nav.openCompanion(ServerProbe.companionUrl(it)) },
+                    onSignalServer = { server, signal -> state.requestSignal(server, signal) },
+                    onSignalProcess = { entry, signal -> state.requestSignal(entry, signal) },
+                ),
             )
         }
     }
 
     /** The card's refresh cadence — the built-in widget's proven 5 s. */
     const val TICK_MS = 5_000L
+
+    /** With nothing changing and the page hidden, the process scan still refreshes every N ticks (30 s). */
+    const val PROC_SLOW_TICKS = 6
 
     /** HTTP checks per pass, hard cap (the canon itself is ≤32 ports). */
     const val HTTP_CHECK_CAP = 12
@@ -255,15 +264,73 @@ internal class ServersState(private val appContext: Context) {
 
     var refreshTick by mutableIntStateOf(0)
 
+    // ---- processes (the second fact source: everything the guest runs).
+    // From the host app a process's cwd is a HOST path; show the guest path.
+    private val procScanner = ProcessScanner(
+        cwdMapper = run {
+            val dataDir = try { appContext.applicationInfo.dataDir } catch (_: Exception) { null }
+            val rootfs = try { RuntimeStorage(appContext.noBackupFilesDir).rootfsDir.path } catch (_: Exception) { null }
+            ({ cwd: String -> ProcPaths.guestPath(cwd, dataDir, rootfs) })
+        },
+    )
+    var procView by mutableStateOf(ProcView.EMPTY)
+    var procAtMs by mutableStateOf(0L)
+
+    /** Set from the layout: the maximized page needs every tick's CPU/memory. */
+    @Volatile var detailed: Boolean = false
+    private var lastProcPidSet: Set<Int> = emptySet()
+    private var tickCount = 0
+
+    // ---- navigation + controls of the maximized task manager.
+    var tab by mutableStateOf(StudioTab.OVERVIEW)
+    var selectedPid by mutableStateOf<Int?>(null)
+    var bgQuery by mutableStateOf("")
+    var bgSort by mutableStateOf(BgSort.MEMORY)
+
+    val hasSelection: Boolean get() = selectedPort != null || selectedPid != null
+
+    fun clearSelection() {
+        selectedPort = null
+        selectedPid = null
+    }
+
     private val scanMutex = Mutex()
 
-    /** One gated pass: the idle gate first, then the full fact sweep. */
+    /**
+     * One gated pass. Servers: the host probe's idle gate decides. Processes:
+     * when the pid set changed, on every tick while the maximized page is
+     * visible, else every [ServersApp.PROC_SLOW_TICKS]th tick.
+     */
     suspend fun tickIfDue() {
         val pidSet = withContext(Dispatchers.IO) { probe.peekPidSet() }
+        tickCount++
         // Never scanned → scan. Otherwise the gate decides: an unchanged
         // pid set over a serverless last snapshot costs one /proc readdir.
-        if (lastScanAtMs != 0L && !probe.shouldFullScan(pidSet)) return
-        scan()
+        if (lastScanAtMs == 0L || probe.shouldFullScan(pidSet)) {
+            scan()
+            return
+        }
+        val procsDue = detailed || pidSet != lastProcPidSet || tickCount % ServersApp.PROC_SLOW_TICKS == 0
+        if (procsDue) scanProcesses()
+    }
+
+    /** The process pass alone (servers untouched) — mutexed with [scan]. */
+    suspend fun scanProcesses() = scanMutex.withLock { runProcessScan(portsByPid()) }
+
+    private fun portsByPid(): Map<Int, List<Int>> =
+        (ui as? ServersUi.Ready)?.servers.orEmpty()
+            .filter { it.pid != null }
+            .groupBy({ it.pid!! }, { it.port })
+            .mapValues { (_, ports) -> ports.sorted() }
+
+    private suspend fun runProcessScan(ports: Map<Int, List<Int>>) {
+        val snap = withContext(Dispatchers.IO) { procScanner.scan() }
+        lastProcPidSet = snap.pidSet
+        procAtMs = snap.atMs
+        procView = ProcViews.build(snap.records, snap.cpu, ports)
+        // A selection whose process vanished degrades to the list — never a
+        // stale detail page for a dead pid.
+        selectedPid?.let { pid -> if (procView.byPid[pid] == null) selectedPid = null }
     }
 
     /**
@@ -322,6 +389,10 @@ internal class ServersState(private val appContext: Context) {
             }
         }
 
+        // The process layer: everything the guest runs, joined to the
+        // listeners by pid (a server is a process that happens to listen).
+        runProcessScan(snapshot.filter { it.pid != null }.groupBy({ it.pid!! }, { it.port }).mapValues { (_, p) -> p.sorted() })
+
         // Process facts per attributed owner: sample, diff, render.
         val now = System.currentTimeMillis()
         for (server in snapshot) {
@@ -369,19 +440,39 @@ internal class ServersState(private val appContext: Context) {
         null
     }
 
-    // ------------------------------------------------------ stop pipeline
+    // ---------------------------------------------------- signal pipeline
 
-    /** The UI's ONE way to ask for a stop; refusals answer instantly. */
-    fun requestStop(server: ServerInfo) {
+    /** The UI's ONE way to ask to signal a server; refusals answer instantly. */
+    fun requestSignal(server: ServerInfo, signal: Signal) {
+        val base = ServersOps.StopRequest(server.pid ?: -1, server.processName, server.port, signal)
         ServersOps.refusal(server)?.let { reason ->
-            stopOutcome = refusedOutcome(server, reason)
+            stopOutcome = refusedOutcome(base, reason)
             return
         }
-        stopPending = ServersOps.StopRequest(
-            port = server.port,
-            pid = server.pid!!,
-            processName = server.processName,
+        // The host probe lists any own-UID listener — including PocketShell's own
+        // helper processes. Identify the pid before offering to signal it.
+        val identity = ProcIdentityCheck.read(server.pid!!)
+        ProcIdentityCheck.refusal(null, identity)?.let { reason ->
+            stopOutcome = refusedOutcome(base, reason)
+            return
+        }
+        stopPending = base.copy(startTicks = identity!!.startTicks)
+    }
+
+    /** …and to signal any guest process (background job, session keeper, a shell). */
+    fun requestSignal(entry: ProcEntry, signal: Signal) {
+        val req = ServersOps.StopRequest(
+            pid = entry.pid,
+            processName = entry.label,
+            signal = signal,
+            endsTerminal = entry.kind == ProcKind.SHELL,
+            startTicks = entry.rec.startTicks,
         )
+        ServersOps.refusal(entry.pid)?.let { reason ->
+            stopOutcome = refusedOutcome(req, reason)
+            return
+        }
+        stopPending = req
     }
 
     fun confirmStop() {
@@ -395,9 +486,13 @@ internal class ServersState(private val appContext: Context) {
         stopPending = null
     }
 
-    /** The one exec: `kill <pid>` in the guest, positioned, never interpolated. */
+    /** The one exec: `kill -s <SIG> <pid>` in the guest, positioned, never interpolated. */
     internal fun runStop(req: ServersOps.StopRequest): ServersOps.Outcome {
-        val argv = ServersOps.argv(req.pid)
+        // The dialog may have sat open for a while: re-verify WHO this pid is, now.
+        ProcIdentityCheck.refusal(req.startTicks, ProcIdentityCheck.read(req.pid))?.let { reason ->
+            return refusedOutcome(req, reason)
+        }
+        val argv = ServersOps.argv(req.pid, req.signal)
         val result = try {
             guestExec(argv, STOP_TIMEOUT_MS)
         } catch (t: Throwable) {
@@ -413,23 +508,25 @@ internal class ServersState(private val appContext: Context) {
         )
     }
 
-    private fun refusedOutcome(server: ServerInfo, reason: String) = ServersOps.Outcome(
-        req = ServersOps.StopRequest(server.port, server.pid ?: -1, server.processName),
+    private fun refusedOutcome(req: ServersOps.StopRequest, reason: String) = ServersOps.Outcome(
+        req = req,
         argv = emptyList(),
         exitCode = null,
         stderr = null,
-        error = "not run — $reason",
+        error = reason, // Outcome.line() adds the "not run — " prefix
         atMs = System.currentTimeMillis(),
     )
 
     /**
      * The exec seam — the SAME closure shape the Git plugin uses: a proot
-     * guest exec against the host runtime, bounded by timeout. The stop
+     * guest exec against the host runtime, bounded by timeout. The signal
      * op is this application's ONLY use of it.
      */
     private fun guestExec(argv: List<String>, timeoutMs: Long): ExecResult {
         val storage = RuntimeStorage(appContext.noBackupFilesDir)
-        val spec = RuntimeProcessLauncher.buildLaunchSpec(
+        // GuestLaunch, not a direct call: buildLaunchSpec$default breaks on a
+        // host whose parameter list grew since the API jar was cut.
+        val spec = GuestLaunch.spec(
             nativeLibraryDir = appContext.applicationInfo.nativeLibraryDir,
             rootfsDir = storage.rootfsDir,
             hostCwd = ShellEnvironment.homeDir(appContext),

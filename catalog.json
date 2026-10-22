@@ -5,13 +5,13 @@
       "name": "Servers",
       "summary": "Dev servers in the Linux guest — live endpoints, HTTP checks, process facts, system health",
       "author": "PocketShell",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/servers.json",
       "plugin": {
         "className": "app.pocketshell.widget.servers.ServersPlugin",
-        "dex": "releases/servers/2.0.0/plugin.jar",
-        "sha256": "920ef56dd78fed0207457fd02a13fde779e8af0aeb9d5fec58067b730466589e"
+        "dex": "releases/servers/2.1.0/plugin.jar",
+        "sha256": "5bb769536a5bf7a6d5cd5a071824fc315d6a43388bde00da165203ec354f88dc"
       }
     },
     {

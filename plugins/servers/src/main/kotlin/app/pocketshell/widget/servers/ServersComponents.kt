@@ -3,27 +3,34 @@ package app.pocketshell.widget.servers
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -129,34 +136,97 @@ internal fun StatChip(label: String, value: String, modifier: Modifier = Modifie
 
 /** The detail page's label/value row — the htop-lite fact line. */
 @Composable
-internal fun KeyValue(label: String, value: String) {
-    Row {
+internal fun KeyValue(label: String, value: String, maxLines: Int = 1, valueColor: Color = HomeTokens.textPrimary) {
+    Row(modifier = Modifier.padding(vertical = 1.dp)) {
         MonoText(text = label, color = HomeTokens.textDim, fontSize = 10, modifier = Modifier.width(84.dp))
-        MonoText(text = value, fontSize = 10)
+        MonoText(text = value, color = valueColor, fontSize = 10, maxLines = maxLines, modifier = Modifier.weight(1f))
     }
 }
 
-/** The maximized dashboard's search field. */
+/** The search field — a plain underlined field, never an outlined box. */
 @Composable
-internal fun SearchField(value: String, onChange: (String) -> Unit) {
-    OutlinedTextField(
+internal fun SearchField(value: String, onChange: (String) -> Unit, placeholder: String = "SEARCH PORT, PROCESS, PATH") {
+    BasicTextField(
         value = value,
         onValueChange = onChange,
         singleLine = true,
-        placeholder = {
-            Text(
-                "search port, process, path…",
-                fontFamily = TerminalTheme.mono,
-                fontSize = 12.sp,
-                color = HomeTokens.textDim,
-            )
-        },
-        textStyle = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = TerminalTheme.mono,
-            color = HomeTokens.textPrimary,
-        ),
+        textStyle = TextStyle(fontFamily = TerminalTheme.mono, fontSize = 13.sp, color = HomeTokens.textPrimary),
+        cursorBrush = SolidColor(HomeTokens.accent),
         modifier = Modifier.fillMaxWidth(),
+        decorationBox = { inner ->
+            Column {
+                Box(modifier = Modifier.heightIn(min = 44.dp), contentAlignment = Alignment.CenterStart) {
+                    if (value.isEmpty()) SectionLabel(placeholder)
+                    inner()
+                }
+                Rule()
+            }
+        },
     )
+}
+
+/** A 1dp hairline — the app's divider; rows and sections are ruled, not boxed. */
+@Composable
+internal fun Rule(modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(1.dp).background(HomeTokens.hairline))
+}
+
+/** One big number over a small-caps label. */
+internal data class StripItem(
+    val value: String,
+    val label: String,
+    val hot: Boolean = false,
+    val onClick: (() -> Unit)? = null,
+)
+
+/** A flat row of big numbers over small-caps labels, ruled above and below. */
+@Composable
+internal fun StatStrip(items: List<StripItem>, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        Rule()
+        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+            items.forEachIndexed { i, item ->
+                if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(HomeTokens.hairline))
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(
+                            if (item.onClick != null) {
+                                Modifier.clickable(role = Role.Button, onClickLabel = "Show ${item.label}") { item.onClick.invoke() }
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        text = item.value,
+                        fontFamily = TerminalTheme.mono,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (item.hot) HomeTokens.accent else HomeTokens.textPrimary,
+                    )
+                    SectionLabel(item.label.uppercase())
+                }
+            }
+        }
+        Rule()
+    }
+}
+
+/**
+ * The row marker that says what a line IS without a word: a filled dot is a
+ * server (green up / red failing), a ring is a background process, a small
+ * square is a session. Flat, 8dp, theme tokens only.
+ */
+@Composable
+internal fun KindDot(kind: ProcKind, ok: Boolean = true, modifier: Modifier = Modifier) {
+    val color = if (ok) HomeTokens.accent else HomeTokens.danger
+    when (kind) {
+        ProcKind.SERVER -> Box(modifier.size(8.dp).background(if (ok) HomeTokens.runningGreen else HomeTokens.danger, CircleShape))
+        ProcKind.MUX, ProcKind.SHELL -> Box(modifier.size(8.dp).background(color))
+        else -> Box(modifier.size(8.dp).border(1.5.dp, color, CircleShape))
+    }
 }
 
 /** The stop pipeline's confirm — the exact command, verbatim, before anything runs. */
@@ -212,9 +282,8 @@ internal fun OutcomeBanner(outcome: ServersOps.Outcome, onDismiss: () -> Unit) {
                 } else {
                     HomeTokens.danger.copy(alpha = 0.12f)
                 },
-                RoundedCornerShape(6.dp),
             )
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatusDot(ok = outcome.ok)

@@ -1,20 +1,50 @@
 # servers — the server monitor plugin
 
-The `servers` widget as a compiled plugin. Version 2.0.0 is the
-manifest→plugin graduation (the same jump git and sync took): the v1
-`widgets/servers.json` six-line listener card becomes the full monitor.
+The `servers` widget as a compiled plugin. 2.0.0 was the manifest→plugin
+graduation (the same jump git and sync took): the v1 `widgets/servers.json`
+six-line listener card became the full monitor. **2.1.0 widens "listening
+ports" to "what is running on this device"**: servers, background
+processes (Gradle daemons, watchers, nohup jobs), terminal sessions and
+session keepers (tmux/screen) — and, as a kernel fact, which of them
+**outlive closing the terminal**. Design + device evidence: `PLAN.md`.
 
 ## The two-mode contract
 
 | | what it shows |
 |---|---|
-| **MINI** (the card, COMPACT/ROOMY) | what is needed immediately: the running count, every verified endpoint as `:port  process` (roomy: + cwd, + HTTP status chip + latency, + the response-beat strip), the honest state line. Tap a row for the in-card detail (endpoint, PID, attribution, TERMINAL / COMPANION). |
-| **MAXIMUM** (the maximized page, FULL) | the desktop-class monitor: device health strip (load 1/5/15, memory used/total, uptime, rootfs disk %), search, four sort modes, per-endpoint HTTP status + latency with the session beat history and uptime %, process facts (PID, CPU%, RSS, argv, cwd), copy-URL, TERMINAL / COMPANION hand-off, and STOP. |
+| **MINI** (the card, COMPACT/ROOMY) | the answer in one glance: `2 up · 3 bg · 1 ses`, then one line per thing — `● :3000 node` (server), `▪ tmux` (session keeper), `○ Gradle daemon 8.14.5  1.2 GB` (background) — and the headline footer `N OUTLIVE THE TERMINAL`. Rows are sized to the card's real height with a `+N more` remainder. ROOMY adds cwd, survival, the HTTP chip and the response-beat strip. Tap a row for the in-card detail (facts + TERMINAL / COMPANION). No destructive action on the card. |
+| **MAXIMUM** (the maximized page, FULL) | a task manager, not a stretched card: title + live summary, four sections behind a bottom bar (side rail when wide) — **OVERVIEW** (numbers, device health, what outlives the terminal, top memory, top CPU), **SERVERS** (endpoints, HTTP checks, response history, process facts, two-pane when wide), **BACKGROUND** (search + sort by memory/CPU/uptime/name, ruled rows, full detail with argv), **SESSIONS** (session keepers, open terminals with their foreground job, what runs below). STOP (SIGTERM) and FORCE KILL (SIGKILL), both confirmed with the exact command. |
 
-The SAME composable renders both — the maximized page is the card in a
-larger container, its information hierarchy re-tiered (ServersLayout),
-never a scaled layout. The maximize toggle is HOST chrome (the card's
-top-right corner); the plugin only adapts.
+Both are flat PocketShell style — hairline rules, mono small-caps, accent text,
+a state rule instead of a pill; no filled cards. The maximize toggle is HOST
+chrome (the card's top-right corner); the plugin only adapts. FULL is decided
+by page height first, so a maximized portrait phone (≈410 dp wide) gets the
+task manager, not the card.
+
+## What "outlives the terminal" means
+
+A kernel fact, never a guess: `Survival.DETACHED` (no controlling tty — closing
+a terminal does not signal it), `NOHUP` (keeps its tty but ignores SIGHUP) or
+`ATTACHED` (ends with its terminal). It is *counted* as outliving only when it
+is also reparented to init (not a child job of something still running), and
+system helpers (dbus, ssh-agent) are excluded from the headline.
+
+## Process facts (the second source)
+
+All from `/proc` of the app's own UID (the kernel hides the rest): `stat`
+(parent, session, tty, foreground group, threads, start, CPU ticks, RSS),
+`status` (SigIgn, **VmSwap**), `cmdline`, `cwd`. Guest = own-UID minus
+infrastructure (`app.pocketshell*`, `libproot.so`, `libpsx.so`). Kinds
+(BUILD / SESSION KEEPER / SHELL / TOOL / SYSTEM / SERVER / PROCESS) are rule
+labels over comm/argv and say no more than the rule matched.
+
+- **Memory is resident + swapped.** A big idle daemon often sits in swap (the
+  device showed a Gradle daemon at 155 MB resident + 1.0 GB swapped); ranking by
+  resident alone would hide it.
+- **Age is unknown ("—"), never 0,** when the uptime clock is evidently stale
+  (a start after "now"). The host's `/proc/uptime` is real; a virtualized one
+  is not trusted.
+- **cwd is mapped back to the guest path** (the host sees `<rootfs>/root/…`).
 
 ## Fact discipline
 
@@ -38,17 +68,23 @@ top-right corner); the plugin only adapts.
 ## Cost discipline
 
 The pid-set idle gate turns an idle card's tick into ONE /proc readdir;
-a card with servers re-verifies (the host probe's own rule); a paused
-monitor does nothing at all. The stop op is the ONLY guest exec.
+a card with servers re-verifies (the host probe's own rule); the process scan
+runs when the pid set changed, on every tick while the maximized page is
+visible, else every 6th tick (30 s); a paused monitor does nothing at all.
+The signal op is the ONLY guest exec.
 
-## The stop op
+## The signal op
 
-ServersOps follows the GitOps discipline: refuse before any dialog when
-the evidence cannot support it (no verified owner pid), confirm with the
-exact command (`kill <pid>` — SIGTERM, positional arg, never
+ServersOps follows the GitOps discipline: refuse before any dialog when the
+evidence cannot support it (no verified owner pid, or a pid ≤ 1), confirm with
+the exact command (`kill -s TERM <pid>`, or `KILL` for FORCE KILL — pid and
+signal are positional args, the signal comes from a closed enum, nothing is
 interpolated), honest outcome (exit code / stderr), forced rescan after.
-It exists only in the maximized tier — the desktop-app context is where
-a task-manager action belongs.
+Signalling a terminal's shell says it ends that terminal. It exists only in the
+maximized tier — the desktop-app context is where a task-manager action belongs.
+The exec goes through `GuestLaunch`, which resolves the host's
+`buildLaunchSpec` at run time (its parameter list grew; a direct call died with
+`NoSuchMethodError: buildLaunchSpec$default`).
 
 ## Build + test
 
@@ -59,20 +95,23 @@ a task-manager action belongs.
 ## Publish
 
 ```bash
-tools/build-plugin.sh servers 2.0.0 --update-catalog
+tools/build-plugin.sh servers 2.1.0 --update-catalog
 ```
 
 ## Files
 
-- `ServersPlugin.kt` — the WidgetPlugin entry (id `servers`, 2.0.0)
+- `ServersPlugin.kt` — the WidgetPlugin entry (id `servers`, 2.1.0)
 - `ServersApp.kt` — the application object, process-scoped state, the
-  lifecycle-aware tick, the HTTP fan-out and the exec seam
-- `ServersScreens.kt` — the one composition, three tiers (card overview /
-  card detail / maximized dashboard + detail, two-pane when wide)
-- `ServersComponents.kt` — the shared controls (dots, chips, beat strip,
-  search, confirm dialog, outcome banner)
-- `ServersProbe.kt` — the probe wrapper (pid-set gate) + the /proc
-  parsers (stat, cmdline, loadavg, meminfo, uptime) + the system strip
+  lifecycle-aware tick, the HTTP fan-out, the signal pipeline and the exec seam
+- `ServersCard.kt` — the MINI mode: row model (`CardRows`), overview, details
+- `ServersStudio.kt` — the MAXIMUM mode: the task-manager shell + navigation
+- `ServersProcessScreens.kt` — BACKGROUND / SESSIONS / OVERVIEW bodies, rows, process detail
+- `ServersScreens.kt` — routing, the SERVERS tab's dashboard + server detail
+- `ServersComponents.kt` — shared controls (rule, stat strip, kind dot, search, dialogs)
+- `ServersProcesses.kt` — pure /proc parsing, classifier, survival, grouping, the scanner
+- `ServersProbe.kt` — the host-probe wrapper (pid-set gate) + system-strip parsers
 - `HttpCheck.kt` — the app-side HTTP check + the session beat ring
 - `ServersPresentation.kt` — filter, sort, formatting (pure, JVM-tested)
-- `ServersOps.kt` — the stop operation's refusal/confirm/argv/outcome
+- `ServersOps.kt` — the signal operation's refusal/confirm/argv/outcome
+- `GuestLaunch.kt` — the host-drift-tolerant launch-spec seam
+- `ServersLayout.kt` — COMPACT / ROOMY / FULL tiers (FULL is height-first)
