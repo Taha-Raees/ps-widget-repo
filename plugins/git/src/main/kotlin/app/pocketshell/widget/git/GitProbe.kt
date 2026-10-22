@@ -234,6 +234,12 @@ internal class GitProbe(
         /** Minimum space between full guest execs when a scan keeps being owed (no data yet, a failing probe). */
         const val AUTO_RESCAN_MS = 45_000L
 
+        /**
+         * A card must stay on screen this long before it starts anything: a fast scroll flings
+         * pages in and out of view, and that must cost nothing.
+         */
+        const val SETTLE_MS = 800L
+
         /** The maximized page refreshes data older than this when it opens; the mini card never does. */
         const val STUDIO_STALE_MS = 5 * 60_000L
 

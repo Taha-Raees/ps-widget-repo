@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -94,6 +95,22 @@ object GitApp : HomeApplication() {
         }
         val lifecycleOwner = LocalLifecycleOwner.current
 
+        // The black box: breadcrumbs of what this card does, and the stack if the process
+        // dies of an exception (see GitTrail). Installed once, observes only.
+        remember {
+            GitTrail.install(
+                try {
+                    File(RuntimeStorage(appContext.noBackupFilesDir).rootfsDir, "tmp/${GitTrail.FILE_NAME}")
+                } catch (_: Exception) {
+                    null
+                },
+            )
+        }
+        DisposableEffect(Unit) {
+            GitTrail.note("card composed")
+            onDispose { GitTrail.note("card disposed") }
+        }
+
         // Is the card actually showing? Home keeps several applications composed
         // side by side, so "resumed" is not "visible" — the probe (dozens of guest
         // git processes) must not run while the user is on another page.
@@ -121,7 +138,12 @@ object GitApp : HomeApplication() {
                     snapshotFlow { onScreen.value to state.studio }
                         .distinctUntilChanged()
                         .collectLatest { (shown, studio) ->
+                            GitTrail.note("on screen=$shown studio=$studio")
                             if (!shown) return@collectLatest
+                            // Let the page SETTLE before doing anything: a fast scroll flings the card
+                            // in and out of view, and each pass must cost nothing. collectLatest
+                            // cancels this wait the instant the card leaves again.
+                            delay(GitProbe.SETTLE_MS)
                             val now = System.currentTimeMillis()
                             val owed = if (state.ui !is GitUi.Ready) {
                                 state.probe.shouldFullScan(now)
@@ -210,7 +232,7 @@ object GitApp : HomeApplication() {
                         repos = repos,
                         scanning = state.scanning,
                         lastScanAtMs = state.probe.lastScanAtMs,
-                        onRefresh = { if (!state.scanning) state.refreshTick++ },
+                        onRefresh = { GitTrail.note("refresh tapped (mini)"); if (!state.scanning) state.refreshTick++ },
                         onOpenTerminal = { context.nav.openTerminal() },
                         onOpenLinuxShell = { context.nav.openLinuxShell() },
                         onOpenDiagnostics = { context.nav.openDiagnostics() },
@@ -554,8 +576,14 @@ internal class GitState(
     /** One scan: the guest exec runs on IO, the flag brackets it (cleared even on cancellation). */
     suspend fun rescan() {
         scanning = true
+        val started = System.currentTimeMillis()
+        GitTrail.note("scan start")
         try {
             ui = scanToUi(withContext(Dispatchers.IO) { probe.snapshot() })
+            GitTrail.note("scan done in ${System.currentTimeMillis() - started} ms -> ${ui.javaClass.simpleName}")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            GitTrail.note("scan cancelled after ${System.currentTimeMillis() - started} ms")
+            throw e
         } finally {
             scanning = false
         }

@@ -50,14 +50,18 @@ class GitMiniTest {
     }
 
     @Test
-    fun `there is no periodic scan loop - a scan runs only when it is owed`() {
+    fun `there is no periodic scan loop - a scan runs only when it is owed, and only after the page settles`() {
         val effect = probeEffect()
         assertFalse("no endless loop may drive the probe", effect.contains("while (true)"))
-        assertFalse("no heartbeat delay either", effect.contains("delay("))
         assertTrue("the card must be on screen first", effect.contains("snapshotFlow { onScreen.value to state.studio }"))
+        // A fast scroll flings the card in and out: nothing may start until it has stayed.
+        assertTrue("the only wait is the settle delay", effect.contains("delay(GitProbe.SETTLE_MS)"))
+        assertEquals("and it is the ONLY delay", 1, Regex("delay\\(").findAll(effect).count())
+        assertTrue("the settle wait comes before any scan decision", effect.indexOf("delay(GitProbe.SETTLE_MS)") < effect.indexOf("state.probe.shouldFullScan(now)"))
+        assertTrue("and before the rescan itself", effect.indexOf("delay(GitProbe.SETTLE_MS)") < effect.indexOf("state.rescan()"))
         // Owed = no data yet, or the maximized page opening on stale data.
-        assertTrue(effect.contains("state.probe.shouldFullScan(now)"))
         assertTrue(effect.contains("GitProbe.STUDIO_STALE_MS"))
+        assertTrue(GitProbe.SETTLE_MS in 300L..2_000L)
         assertTrue(GitProbe.STUDIO_STALE_MS >= 5 * 60_000L)
         assertTrue(GitProbe.AUTO_RESCAN_MS >= 45_000L)
     }

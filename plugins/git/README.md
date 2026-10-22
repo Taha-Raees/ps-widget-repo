@@ -11,7 +11,7 @@ SHA-256 and loads with `DexClassLoader`.
 |---|---|
 | Catalog id | `git` |
 | Entry class | `app.pocketshell.widget.git.GitPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.4.1` |
+| Current version | `3.4.2` |
 | Namespace | `app.pocketshell.widget.git` |
 | Source of truth | THIS directory |
 
@@ -25,6 +25,13 @@ SHA-256 and loads with `DexClassLoader`.
   the manual refresh, after a git action, and when the maximized page opens on data older
   than 5 minutes. There is NO periodic loop. A scan spawns dozens of guest `git` processes
   (low priority via `renice`); a loading rule shows while it runs.
+- **Fast-scroll safe**: nothing starts until the card has stayed on screen for 0.8 s
+  (`GitProbe.SETTLE_MS`); flinging the pager past Git costs nothing.
+- **Black box** (`GitTrail.kt`): the last 60 events (composed / disposed, on screen / off, scan
+  start / end with duration, refresh taps) are flushed to `/tmp/pocketshell-git-trail.log` in
+  the Linux shell, and an uncaught exception appends its full stack there before being handed
+  on to the app's own handler (behaviour unchanged, only observed). The host records no crash
+  information, so this is how a Git crash becomes readable. Local file only.
 - **Never blocks the UI thread**: the probe's gate state is lock-free. It used to share a
   lock with the scan itself (held for the whole guest exec), so any recomposition — such as
   returning to the card from another plugin — froze the main thread until the scan ended,
@@ -89,6 +96,6 @@ workstation (3.1.0 supersedes a parallel 3.0.0 build).
 
 ```bash
 ./gradlew :plugins:git:assembleDebug :plugins:git:testDebugUnitTest
-tools/build-plugin.sh git 3.4.1               # build + dex to releases/git/3.4.1/plugin.jar
+tools/build-plugin.sh git 3.4.2               # build + dex to releases/git/3.4.2/plugin.jar
 tools/build-plugin.sh git 3.0.1 --update-catalog   # publish a new version + pin sha256 in catalog.json
 ```
