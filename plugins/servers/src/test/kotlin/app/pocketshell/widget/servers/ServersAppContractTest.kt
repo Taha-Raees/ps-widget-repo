@@ -16,7 +16,7 @@ class ServersAppContractTest {
     fun `the plugin answers to the catalog id and version`() {
         val plugin = ServersPlugin()
         assertEquals("servers", plugin.pluginId)
-        assertEquals("2.1.1", plugin.pluginVersion)
+        assertEquals("2.1.2", plugin.pluginVersion)
     }
 
     @Test

@@ -280,9 +280,11 @@ object SyncApp : HomeApplication() {
         LaunchedEffect(state.detailId) {
             state.previewUi = PreviewUi.Idle
             state.previewTick = 0
+            state.previewOnce.reset()
             state.runUi = RunUi.Idle
             state.verifyUi = VerifyUi.Idle
             state.verifyTick = 0
+            state.verifyOnce.reset()
         }
 
         // M8.4.1 — the REAL run: additive-only (rsync -a with no removing
@@ -293,6 +295,9 @@ object SyncApp : HomeApplication() {
         // — a run that happened is a fact, and so is a failure.
         LaunchedEffect(state.runTick) {
             if (state.runTick == 0) return@LaunchedEffect
+            // The holder outlives the composition: coming back re-enters this effect with the
+            // old tick, and must NOT start another real run. Claim each tick once.
+            if (!state.runOnce.claim(state.runTick)) return@LaunchedEffect
             val profile = state.detailId?.let { id -> state.profilesRef.value.firstOrNull { it.id == id } }
                 ?: return@LaunchedEffect
             val snapshot = (state.ui as? SyncUi.Ready)?.snapshot ?: return@LaunchedEffect
@@ -331,6 +336,7 @@ object SyncApp : HomeApplication() {
         // HOLDER-ONLY — a check is not a run, and the store records runs.
         LaunchedEffect(state.verifyTick) {
             if (state.verifyTick == 0) return@LaunchedEffect
+            if (!state.verifyOnce.claim(state.verifyTick)) return@LaunchedEffect
             val profile = state.detailId?.let { id -> state.profilesRef.value.firstOrNull { it.id == id } }
                 ?: return@LaunchedEffect
             val snapshot = (state.ui as? SyncUi.Ready)?.snapshot ?: return@LaunchedEffect
@@ -349,6 +355,7 @@ object SyncApp : HomeApplication() {
         // (one bounded `apk add`), then re-probe so availability flips.
         LaunchedEffect(state.installTick) {
             if (state.installTick == 0) return@LaunchedEffect
+            if (!state.installOnce.claim(state.installTick)) return@LaunchedEffect
             val profile = state.detailId?.let { id -> state.profilesRef.value.firstOrNull { it.id == id } }
                 ?: return@LaunchedEffect
             state.installUi = RunUi.Running
@@ -363,6 +370,7 @@ object SyncApp : HomeApplication() {
         // only if this effect is still the current one.
         LaunchedEffect(state.previewTick) {
             if (state.previewTick == 0) return@LaunchedEffect
+            if (!state.previewOnce.claim(state.previewTick)) return@LaunchedEffect
             val profile = state.detailId?.let { id -> state.profilesRef.value.firstOrNull { it.id == id } }
                 ?: return@LaunchedEffect
             val snapshot = (state.ui as? SyncUi.Ready)?.snapshot ?: return@LaunchedEffect
@@ -522,6 +530,12 @@ internal class SyncState(val probe: SyncProbe) {
 
     /** The backup/restore holder (process-scoped like everything here); created once by Content. */
     var vault: VaultState? = null
+
+    /** Each manual action's tick is claimed once, however often its effect restarts. */
+    val runOnce = RunOnce()
+    val previewOnce = RunOnce()
+    val verifyOnce = RunOnce()
+    val installOnce = RunOnce()
 
     /** M8.4.5 — path-completion state for the new-profile form. */
     var sourceSuggestions by mutableStateOf<List<String>>(emptyList())

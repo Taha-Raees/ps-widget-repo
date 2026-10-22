@@ -10,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
@@ -111,25 +112,23 @@ object GitApp : HomeApplication() {
                 .distinctUntilChanged()
                 .collectLatest { active ->
                     if (!active) return@collectLatest
-                    // Only while the card is on screen: paging or scrolling away
-                    // cancels the loop (and any tick), coming back restarts it.
-                    snapshotFlow { onScreen.value }
+                    // NO periodic loop. A scan spawns dozens of guest git processes, so it
+                    // runs only when something is actually owed:
+                    //   - the card first shows with no data yet (app start),
+                    //   - the maximized page opens on data older than STUDIO_STALE_MS,
+                    // and elsewhere only on the manual refresh and after a git action.
+                    // The mini card is a pure view of the cached snapshot.
+                    snapshotFlow { onScreen.value to state.studio }
                         .distinctUntilChanged()
-                        .collectLatest { shown ->
+                        .collectLatest { (shown, studio) ->
                             if (!shown) return@collectLatest
-                            // Re-entry execs NOTHING on top of a usable cache: the
-                            // SAME staleness policy as the tick loop decides. Only
-                            // a cache-less ui (Probing, a failed probe — hasCache
-                            // false) or a cache older than the idle gate re-scans.
-                            val hasCache = state.ui is GitUi.Ready
-                            if (!hasCache || state.probe.shouldFullScan(System.currentTimeMillis())) {
-                                state.rescan()
+                            val now = System.currentTimeMillis()
+                            val owed = if (state.ui !is GitUi.Ready) {
+                                state.probe.shouldFullScan(now)
+                            } else {
+                                studio && now - state.probe.lastScanAtMs >= GitProbe.STUDIO_STALE_MS
                             }
-                            while (true) {
-                                delay(GitProbe.TICK_MS)
-                                if (!state.probe.shouldFullScan(System.currentTimeMillis())) continue
-                                state.rescan()
-                            }
+                            if (owed) state.rescan()
                         }
                 }
         }
@@ -137,6 +136,9 @@ object GitApp : HomeApplication() {
         // The manual refresh control: one scan, outside the gate.
         LaunchedEffect(state.refreshTick) {
             if (state.refreshTick == 0 || context.runtimeState != RuntimeState.READY) return@LaunchedEffect
+            // This state outlives the composition: returning to the card re-enters this effect
+            // with the old tick. Claim it once so coming back never triggers another scan.
+            if (!state.refreshRunOnce.claim(state.refreshTick)) return@LaunchedEffect
             state.rescan()
         }
 
@@ -173,10 +175,7 @@ object GitApp : HomeApplication() {
             val layout = GitLayout.from(maxWidth.value, maxHeight.value)
             val repos = (state.ui as? GitUi.Ready)?.snapshot?.repos.orEmpty()
             state.retain(repos)
-            // The mini card's repository detail owns Back before the card does.
-            BackHandler(enabled = state.miniDetail != null && state.stack.isEmpty() && !layout.isWorkspace) {
-                state.miniDetail = null
-            }
+            SideEffect { state.studio = layout.isWorkspace }
 
             // Any pending confirm renders above everything; nothing runs
             // until it is answered.
@@ -209,17 +208,9 @@ object GitApp : HomeApplication() {
                     ) else GitMiniCard(
                         ui = state.ui,
                         repos = repos,
-                        layout = layout,
                         scanning = state.scanning,
-                        detailPath = state.miniDetail,
                         lastScanAtMs = state.probe.lastScanAtMs,
                         onRefresh = { if (!state.scanning) state.refreshTick++ },
-                        onOpenRepo = { state.miniDetail = it },
-                        onCloseRepo = { state.miniDetail = null },
-                        onOpenWorkspace = { repo -> state.open(Screen.Workspace(repo.path)) },
-                        onOpenCommit = { repo, entry ->
-                            state.open(Screen.CommitPage(repoPath = repo.path, hash = entry.hash))
-                        },
                         onOpenTerminal = { context.nav.openTerminal() },
                         onOpenLinuxShell = { context.nav.openLinuxShell() },
                         onOpenDiagnostics = { context.nav.openDiagnostics() },
@@ -560,9 +551,6 @@ internal class GitState(
     /** True while a scan is running — the cards show a loading indicator, never a silent stall. */
     var scanning by mutableStateOf(false)
 
-    /** The repository open in the MINI card's detail view (null = the list). */
-    var miniDetail by mutableStateOf<String?>(null)
-
     /** One scan: the guest exec runs on IO, the flag brackets it (cleared even on cancellation). */
     suspend fun rescan() {
         scanning = true
@@ -575,6 +563,12 @@ internal class GitState(
 
     /** Guarantees each launched op runs once, however often the effect restarts. */
     val opRunOnce = RunOnce()
+
+    /** The same guarantee for the manual refresh: one tap = one scan, never one per re-entry. */
+    val refreshRunOnce = RunOnce()
+
+    /** True while the maximized page is showing (set from the layout) — it alone refreshes stale data on open. */
+    var studio by mutableStateOf(false)
 
     private var opSerial = 0
 

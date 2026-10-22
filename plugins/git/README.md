@@ -11,21 +11,25 @@ SHA-256 and loads with `DexClassLoader`.
 |---|---|
 | Catalog id | `git` |
 | Entry class | `app.pocketshell.widget.git.GitPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.4.0` |
+| Current version | `3.4.1` |
 | Namespace | `app.pocketshell.widget.git` |
 | Source of truth | THIS directory |
 
 ## What it does
 
-- **Mini card**: a flat at-a-glance list — one ruled row per repository with a state
-  dot (filled = uncommitted changes, ring = clean / commits to push or pull, red =
-  unreadable), repositories that need attention first, rows sized to the card's height,
-  a footer like `9 repos · 2 dirty · ↑47 to push · +6 more`, and a thin indeterminate
-  rule while a scan runs. A tap opens that repository's in-card detail (one Back away).
-- **Home stays smooth**: the probe (dozens of guest `git` processes) runs ONLY while the
-  card is actually on screen (window-bounds test, so a pager page or a scrolled-away
-  card stops it), at low priority (`renice`), at most every 45 s; a manual refresh and
-  every mutation still rescan immediately. Every scan shows a loading indicator.
+- **Mini card**: ONLY the summary — the same header and four numbers the maximized page
+  opens with (`9 repos · 2 dirty · ↑49 to push · ↓0 to pull`, git version, scan age,
+  terminal and refresh buttons). No repository list, no folders; a glance, not a browser.
+  It is a pure view of the cached snapshot and costs nothing to render.
+- **Scans only when owed**: once when the card first shows with no data (app start), on
+  the manual refresh, after a git action, and when the maximized page opens on data older
+  than 5 minutes. There is NO periodic loop. A scan spawns dozens of guest `git` processes
+  (low priority via `renice`); a loading rule shows while it runs.
+- **Never blocks the UI thread**: the probe's gate state is lock-free. It used to share a
+  lock with the scan itself (held for the whole guest exec), so any recomposition — such as
+  returning to the card from another plugin — froze the main thread until the scan ended,
+  and an ANR could kill the app. A regression test pins it. Returning to the card also no
+  longer re-runs the last manual refresh (the tick is claimed once).
 - **Git Studio** (the maximized page, `GitStudio.kt`): a full-screen app shell in
   the app's flat style (hairlines, no cards) — a summary strip, one ruled row
   per repository (state rule: accent = changes, danger = unreadable), an app
@@ -85,6 +89,6 @@ workstation (3.1.0 supersedes a parallel 3.0.0 build).
 
 ```bash
 ./gradlew :plugins:git:assembleDebug :plugins:git:testDebugUnitTest
-tools/build-plugin.sh git 3.4.0               # build + dex to releases/git/3.4.0/plugin.jar
+tools/build-plugin.sh git 3.4.1               # build + dex to releases/git/3.4.1/plugin.jar
 tools/build-plugin.sh git 3.0.1 --update-catalog   # publish a new version + pin sha256 in catalog.json
 ```

@@ -340,16 +340,18 @@ class GitAppContractTest {
     @Test
     fun `returning to the card renders the cache and gates any rescan`() {
         val app = stripCommentsAndStrings(gitSource("GitApp.kt"))
+        val effect = app.substring(app.indexOf("LaunchedEffect(context.runtimeState)"), app.indexOf("LaunchedEffect(state.refreshTick)"))
         assertTrue(
-            "the resume edge must check for a cached Ready snapshot before scanning",
-            app.contains("val hasCache = state.ui is GitUi.Ready"),
+            "a cached Ready snapshot is rendered as-is: only a cache-LESS ui is owed a scan, behind the staleness gate",
+            effect.contains("state.ui !is GitUi.Ready") && effect.contains("state.probe.shouldFullScan(now)"),
         )
         assertTrue(
-            "the resume edge scan must be gated by the SAME staleness gate " +
-                "as the tick loop (no guest exec on every re-entry)",
-            Regex(
-                """if \(!hasCache \|\| state\.probe\.shouldFullScan\(System\.currentTimeMillis\(\)\)\)""",
-            ).containsMatchIn(app),
+            "with a cache, only the maximized page may refresh — and only stale data",
+            effect.contains("studio && now - state.probe.lastScanAtMs >= GitProbe.STUDIO_STALE_MS"),
+        )
+        assertTrue(
+            "re-entry never rescans on its own: the manual-refresh effect claims its tick once",
+            app.contains("state.refreshRunOnce.claim(state.refreshTick)"),
         )
     }
 

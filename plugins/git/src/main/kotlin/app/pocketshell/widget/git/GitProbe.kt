@@ -129,22 +129,29 @@ internal class GitProbe(
         fun exec(guestCommand: List<String>, timeoutMs: Long): ExecResult
     }
 
-    private val lock = Any()
-    private var hasScanned = false
-    private var lastScanAt = 0L
-    private var lastSnapshot: GitSnapshot? = null
+    /**
+     * Serializes SCANS only. The gate state below is deliberately NOT behind
+     * this lock: a scan holds it for the whole guest exec (many seconds for a
+     * dozen repositories), and the UI thread reads the gate on every
+     * recomposition and every tick — taking the same lock there froze the main
+     * thread for as long as a scan ran (the "lag when I come back to Git", and
+     * an ANR kill when it ran long). The gate is plain volatile reads.
+     */
+    private val execLock = Any()
+
+    @Volatile private var hasScanned = false
+    @Volatile private var lastScanAt = 0L
+    @Volatile private var lastSnapshot: GitSnapshot? = null
 
     /**
      * The idle gate (ServerProbe's shouldFullScan shape): a tick that fires
      * too soon after the last full scan does nothing at all — no guest
      * exec, no rootfs reads, no cost. The first tick always scans.
      */
-    fun shouldFullScan(nowMs: Long): Boolean = synchronized(lock) {
-        !hasScanned || nowMs - lastScanAtMs >= AUTO_RESCAN_MS
-    }
+    fun shouldFullScan(nowMs: Long): Boolean = !hasScanned || nowMs - lastScanAt >= AUTO_RESCAN_MS
 
     /** The most recent successful snapshot, if any (for instant re-layout). */
-    val cached: GitSnapshot? get() = synchronized(lock) { lastSnapshot }
+    val cached: GitSnapshot? get() = lastSnapshot
 
     /**
      * One full probe pass. Blocking (proot spawn + script) — callers wrap
@@ -152,7 +159,7 @@ internal class GitProbe(
      * failures come back as [ScanResult.Failed]; the UI never dresses a
      * dead probe up as "no repositories".
      */
-    fun snapshot(): ScanResult = synchronized(lock) {
+    fun snapshot(): ScanResult = synchronized(execLock) {
         hasScanned = true
         lastScanAt = clock()
         val result: ScanResult = try {
@@ -187,10 +194,12 @@ internal class GitProbe(
      * UI may show new state is git answering again) and by the manual
      * refresh control.
      */
-    fun invalidate() = synchronized(lock) { hasScanned = false }
+    fun invalidate() {
+        hasScanned = false
+    }
 
     /** When the last scan finished (for the honest "scanned Ns ago" line). */
-    val lastScanAtMs: Long get() = synchronized(lock) { lastScanAt }
+    val lastScanAtMs: Long get() = lastScanAt
 
     private fun stderrTail(out: ExecResult): String? =
         out.stderr.lineSequence().lastOrNull { it.isNotBlank() }
@@ -222,11 +231,11 @@ internal class GitProbe(
         /** Bounded: a full guest round-trip (proot + find + N status calls). */
         const val SCAN_TIMEOUT_MS = 20_000L
 
-        /** Cheap heartbeat tick: decides, spends nothing when the gate says no. */
-        const val TICK_MS = 5_000L
-
-        /** Minimum space between full guest execs on an open, watched card. */
+        /** Minimum space between full guest execs when a scan keeps being owed (no data yet, a failing probe). */
         const val AUTO_RESCAN_MS = 45_000L
+
+        /** The maximized page refreshes data older than this when it opens; the mini card never does. */
+        const val STUDIO_STALE_MS = 5 * 60_000L
 
         /** Protocol caps — MUST match the script's own bounds (-5, head -n). */
         const val LOG_MAX_ENTRIES = 5

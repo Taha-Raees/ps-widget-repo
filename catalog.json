@@ -5,13 +5,13 @@
       "name": "Servers",
       "summary": "Dev servers in the Linux guest — live endpoints, HTTP checks, process facts, system health",
       "author": "PocketShell",
-      "version": "2.1.1",
+      "version": "2.1.2",
       "minAppVersion": "0.13.0",
       "file": "widgets/servers.json",
       "plugin": {
         "className": "app.pocketshell.widget.servers.ServersPlugin",
-        "dex": "releases/servers/2.1.1/plugin.jar",
-        "sha256": "c6c2aec3ad432930ae0ef67fecbc3ff4ecafa9c999e78a047dd32206199d73f1"
+        "dex": "releases/servers/2.1.2/plugin.jar",
+        "sha256": "6eee1c71b724aa372bc649c3d4a1b55f3f795b8a4ac526149ff3300529d07c63"
       }
     },
     {
@@ -37,13 +37,13 @@
       "name": "Git",
       "summary": "Repositories in the Linux guest — changes, history, branches, files, remotes",
       "author": "PocketShell core",
-      "version": "3.4.0",
+      "version": "3.4.1",
       "minAppVersion": "0.13.0",
       "file": "widgets/git.json",
       "plugin": {
         "className": "app.pocketshell.widget.git.GitPlugin",
-        "dex": "releases/git/3.4.0/plugin.jar",
-        "sha256": "7724250de694207a42f5899354a89b3ad846dbf095969b08e9cbb2e1532bfb33"
+        "dex": "releases/git/3.4.1/plugin.jar",
+        "sha256": "5af181898dedc791f8b629a19e1f7808953d5c3dc9579cc56790a8b1cd31d779"
       }
     },
     {
@@ -51,13 +51,13 @@
       "name": "Sync",
       "summary": "Backup profiles — source, destination, backend, last run outcome",
       "author": "PocketShell core",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "minAppVersion": "0.13.0",
       "file": "widgets/sync.json",
       "plugin": {
         "className": "app.pocketshell.widget.sync.SyncPlugin",
-        "dex": "releases/sync/3.0.0/plugin.jar",
-        "sha256": "33288726142ec2eaadf3872017bf7c7193112bd5f1852b9d01d922efb6bd184f"
+        "dex": "releases/sync/3.0.1/plugin.jar",
+        "sha256": "07dbcea5b1bb856dfd41371171754ceb01cb0eb5cd7bc5f8647c2de3dd8b2fff"
       }
     },
     {

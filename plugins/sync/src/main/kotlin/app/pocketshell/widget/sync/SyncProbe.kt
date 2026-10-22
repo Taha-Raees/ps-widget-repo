@@ -92,14 +92,20 @@ internal class SyncProbe(
         fun exec(guestCommand: List<String>, timeoutMs: Long): ExecResult
     }
 
-    private val lock = Any()
-    private var hasScanned = false
-    private var lastScanAtMs: Long = 0L
+    /**
+     * Serializes SCANS only. The gate state is deliberately NOT behind this
+     * lock: a scan holds it for the whole guest exec, and the UI thread reads
+     * the gate on every tick — sharing the lock froze the main thread for as
+     * long as a scan ran (the Git card's "lag when I come back"). Plain
+     * volatile reads instead.
+     */
+    private val execLock = Any()
 
-    /** The idle gate (GitProbe's shape): too-soon ticks spend nothing. */
-    fun shouldFullScan(nowMs: Long): Boolean = synchronized(lock) {
-        !hasScanned || nowMs - lastScanAtMs >= AUTO_RESCAN_MS
-    }
+    @Volatile private var hasScanned = false
+    @Volatile private var lastScanAtMs: Long = 0L
+
+    /** The idle gate (GitProbe's shape): too-soon ticks spend nothing — and never wait on a scan. */
+    fun shouldFullScan(nowMs: Long): Boolean = !hasScanned || nowMs - lastScanAtMs >= AUTO_RESCAN_MS
 
     /**
      * One full probe pass over the current profiles. Blocking — callers
@@ -107,7 +113,7 @@ internal class SyncProbe(
      * [ProbeResult.Failed]; the UI never dresses a dead probe up as
      * "no profiles".
      */
-    fun snapshot(profiles: List<SyncProfile>): ProbeResult = synchronized(lock) {
+    fun snapshot(profiles: List<SyncProfile>): ProbeResult = synchronized(execLock) {
         hasScanned = true
         lastScanAtMs = clock()
         val result: ProbeResult = try {

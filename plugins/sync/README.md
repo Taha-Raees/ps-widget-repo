@@ -13,7 +13,7 @@ loads with `DexClassLoader`. Design + device evidence: `PLAN.md`.
 |---|---|
 | Catalog id | `sync` |
 | Entry class | `app.pocketshell.widget.sync.SyncPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.0.0` |
+| Current version | `3.0.1` |
 | Namespace | `app.pocketshell.widget.sync` |
 | Source of truth | THIS directory |
 
@@ -84,6 +84,13 @@ file kept as `.pre-restore`, applied on the next app start).
 - `SyncRepository.kt` — owns the `sync_profiles` DataStore file
 - `SyncPreviewParser.kt`, `SyncRunStats.kt` — preview/run-stats parsing
 
+## Re-entry and the UI thread
+
+The probe's idle gate is lock-free (it shares nothing with the scan's lock), the card scans only
+while on screen, and every manual action (RUN NOW, preview, verify, install) claims its tick
+once — returning to the card used to re-enter those effects with the old tick and could start
+a second real run.
+
 ## Limits (stated, not hidden)
 
 - Every backup is a full snapshot (zstd + excludes keep it small); there is no
@@ -106,5 +113,5 @@ pre-move history.
 
 ```bash
 ./gradlew :plugins:sync:assembleDebug :plugins:sync:testDebugUnitTest
-tools/build-plugin.sh sync 3.0.0 --update-catalog   # build + dex + publish + pin sha256 in catalog.json
+tools/build-plugin.sh sync 3.0.1 --update-catalog   # build + dex + publish + pin sha256 in catalog.json
 ```

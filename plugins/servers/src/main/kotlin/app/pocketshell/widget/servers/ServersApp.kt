@@ -146,6 +146,8 @@ object ServersApp : HomeApplication() {
         // The manual refresh control: one pass, outside the gate.
         LaunchedEffect(state.refreshTick) {
             if (state.refreshTick == 0 || context.runtimeState != RuntimeState.READY) return@LaunchedEffect
+            // The holder outlives the composition: coming back must not re-run the last refresh.
+            if (!state.refreshRunOnce.claim(state.refreshTick)) return@LaunchedEffect
             state.scan()
         }
 
@@ -275,6 +277,9 @@ internal class ServersState(private val appContext: Context) {
 
     var refreshTick by mutableIntStateOf(0)
 
+    /** One tap = one scan, never one per re-entry. */
+    val refreshRunOnce = RunOnce()
+
     // ---- processes (the second fact source: everything the guest runs).
     // From the host app a process's cwd is a HOST path; show the guest path.
     private val procScanner = ProcessScanner(
@@ -317,7 +322,10 @@ internal class ServersState(private val appContext: Context) {
         tickCount++
         // Never scanned → scan. Otherwise the gate decides: an unchanged
         // pid set over a serverless last snapshot costs one /proc readdir.
-        if (lastScanAtMs == 0L || probe.shouldFullScan(pidSet)) {
+        // The host probe's gate may take its own lock (a scan holds it for the whole
+        // exec): ask it OFF the main thread, never from this composition-scoped coroutine.
+        val due = lastScanAtMs == 0L || withContext(Dispatchers.IO) { probe.shouldFullScan(pidSet) }
+        if (due) {
             scan()
             return
         }

@@ -95,12 +95,12 @@ internal val RepoTab.icon: ImageVector
 // ------------------------------------------------------------ primitives
 
 @Composable
-private fun Hairline(modifier: Modifier = Modifier) {
+internal fun Hairline(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(HomeTokens.hairline))
 }
 
 @Composable
-private fun StudioIconButton(icon: ImageVector, description: String, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun StudioIconButton(icon: ImageVector, description: String, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(48.dp)
@@ -113,48 +113,6 @@ private fun StudioIconButton(icon: ImageVector, description: String, enabled: Bo
             tint = if (enabled) HomeTokens.accent else HomeTokens.textDim,
             modifier = Modifier.size(24.dp),
         )
-    }
-}
-
-private data class StripItem(
-    val value: String,
-    val label: String,
-    val hot: Boolean = false,
-    val onClick: (() -> Unit)? = null,
-)
-
-/** A flat row of big numbers over small-caps labels, ruled above and below. */
-@Composable
-private fun StatStrip(items: List<StripItem>, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth()) {
-        Hairline()
-        Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-            items.forEachIndexed { i, item ->
-                if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(HomeTokens.hairline))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .then(
-                            if (item.onClick != null) {
-                                Modifier.clickable(role = Role.Button, onClickLabel = "Show ${item.label}") { item.onClick.invoke() }
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                ) {
-                    Text(
-                        text = item.value,
-                        fontFamily = TerminalTheme.mono,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (item.hot) HomeTokens.accent else HomeTokens.textPrimary,
-                    )
-                    MonoText(text = item.label.uppercase(), color = HomeTokens.textDim, fontSize = 9.sp)
-                }
-            }
-        }
-        Hairline()
     }
 }
 
@@ -177,38 +135,11 @@ internal fun StudioHome(
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val columns = if (GitLayout.usesSideRail(maxWidth.value)) 2 else 1
         Column(modifier = Modifier.fillMaxSize()) {
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Repositories",
-                        fontSize = 26.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = HomeTokens.textPrimary,
-                    )
-                    val facts = listOfNotNull(
-                        ready?.snapshot?.gitVersion?.let { "git $it" },
-                        if (scanning) "scanning…" else if (repos.isNotEmpty()) "scanned ${GitPresentation.ageLabel(System.currentTimeMillis(), lastScanAtMs)}" else null,
-                    )
-                    if (facts.isNotEmpty()) MonoText(text = facts.joinToString(" · "), color = HomeTokens.textDim, fontSize = 10.sp)
-                }
-                StudioIconButton(Icons.Outlined.Terminal, "Open terminal", onClick = onOpenTerminal)
-                StudioIconButton(Icons.Outlined.Refresh, "Refresh repositories", enabled = !scanning, onClick = onRefresh)
-            }
+            GitSummaryHeader(ui, repos, lastScanAtMs, scanning, titleSp = 26, onRefresh = onRefresh, onOpenTerminal = onOpenTerminal)
             LoadingRule(active = scanning)
 
             if (repos.isNotEmpty()) {
-                val ahead = repos.sumOf { it.status?.ahead ?: 0 }
-                val behind = repos.sumOf { it.status?.behind ?: 0 }
-                val dirty = ready?.snapshot?.dirtyRepos ?: 0
-                StatStrip(
-                    items = listOf(
-                        StripItem("${repos.size}", "repos"),
-                        StripItem("$dirty", "dirty", hot = dirty > 0),
-                        StripItem("↑$ahead", "to push", hot = ahead > 0),
-                        StripItem("↓$behind", "to pull", hot = behind > 0),
-                    ),
-                    modifier = Modifier.padding(top = 12.dp),
-                )
+                GitSummaryStrip(ui, repos, modifier = Modifier.padding(top = 12.dp))
                 if (repos.size > 3) FilterField(query) { query = it }
                 val shown = repos.filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
                 Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
