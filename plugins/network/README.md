@@ -1,4 +1,25 @@
-# network — a cockpit for the networking CLIs
+# network - Network & Home Lab
+
+**2.0.0 turns the Network cockpit into Network & Home Lab.** Same plugin id (`network`), so installs update in place.
+It gains two tabs, LAB and TOOLS, in front of the four it keeps; the old CHECKS tab became a section of TOOLS. The card's four numbers are now `HOSTS - LAB - TUNNELS up/total - SHARING` (saved lab servers instead of keys).
+
+| tab | what it does |
+|---|---|
+| **LAB** | **Devices on this network** - a bounded sweep of your Wi-Fi subnet (at most a /24: one short TCP connect per address on a few ports; a host that answers *or refuses* is alive), reverse-DNS names, open ports, a best-guess type (Router, Home Assistant, Proxmox, Printer...), SAVE as a server, PING / PORTS / COPY IP. **Lab servers** - your NAS, Pi-hole, dashboards: health by TCP connect plus one HTTP request, latency, OPEN link, and (with a saved ssh host) load / memory / disk read over ssh with one constant script. |
+| **TOOLS** | **DNS lookup** (A, AAAA, MX, TXT, NS, CNAME, PTR; any IPv4 resolver, TCP fallback when truncated), **ping**, **traceroute**, **port check** (a list or range, or the common ports), and the connectivity check. |
+| HOSTS, KEYS, TUNNELS, SHARE | unchanged from 1.1.0. |
+
+Honest limits of the Lab, all from running it in a PocketShell guest:
+
+- `ping` works in the guest (ICMP is allowed); if it cannot run, the tool falls back to timing TCP connects and says so.
+- `traceroute` needs raw sockets, which the guest denies. `tracepath` works without them but is not installed by
+  default (`apk add iputils-tracepath`, or Packages > Add > Network tools); the tool says exactly that.
+- Android 10+ hides `/proc/net/arp` from apps, so MAC addresses are usually unavailable.
+- Discovery uses TCP only. A device that drops every unsolicited packet will not be found.
+- The sweep never leaves your own subnet and never exceeds 254 addresses; it can be stopped at any time.
+
+The 1.1.0 text follows (its five-tab description predates LAB / TOOLS).
+
 
 SSH hosts, keys, port forwards, folder sharing and connectivity checks, as one
 PocketShell Home application. It does not replace `ssh`: it reads and writes the same
@@ -32,7 +53,7 @@ and run a tunnel or a share.
 ## Build
 
 ```
-tools/build-plugin.sh network 1.1.0 --update-catalog
+tools/build-plugin.sh network 2.0.0 --update-catalog
 ./gradlew :plugins:network:testDebugUnitTest
 ```
 

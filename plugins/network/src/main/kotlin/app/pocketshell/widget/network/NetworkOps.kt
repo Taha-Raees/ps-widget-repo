@@ -109,6 +109,30 @@ class GuestExec(private val appContext: Context, private val files: NetFiles) {
         }.ifEmpty { null }
     }
 
+    /** `ping` in the guest, or why it cannot run here. Host is validated by the caller ([LabNet.validHost]). */
+    fun ping(host: String, count: Int = 4): PingOutcome {
+        val r = run(listOf("ping", "-c", count.coerceIn(1, 10).toString(), "-W", "2", host), 30_000)
+        val text = r.stdout + "\n" + r.stderr + "\n" + (r.error ?: "")
+        PingParse.parse(r.stdout)?.let { return PingOutcome.Done(it, "ping") }
+        return PingOutcome.CannotRun(PingParse.cannotRun(text) ?: (r.error ?: r.stderr.lines().lastOrNull { it.isNotBlank() } ?: "ping gave no result"))
+    }
+
+    /** `traceroute -n`, else `tracepath -n`; null when neither could run. */
+    fun trace(host: String): Pair<List<Hop>, String>? {
+        val a = run(listOf("traceroute", "-n", "-w", "2", "-q", "1", "-m", "20", host), 60_000)
+        TraceParse.parse(a.stdout).takeIf { it.isNotEmpty() }?.let { return it to "traceroute" }
+        val b = run(listOf("tracepath", "-n", "-m", "20", host), 60_000)
+        TraceParse.parse(b.stdout).takeIf { it.isNotEmpty() }?.let { return it to "tracepath" }
+        return null
+    }
+
+    /** CPU load, memory and disk of a saved ssh host, from a constant script. Null when ssh could not log in. */
+    fun vitals(alias: String): Vitals? {
+        val r = run(listOf("ssh") + BATCH + listOf(alias, VitalsParse.REMOTE_SCRIPT), 25_000)
+        if (r.exitCode != 0) return null
+        return VitalsParse.parse(r.stdout)
+    }
+
     /** Create an ed25519 key pair. The name was validated and the pair does not exist yet. */
     fun generateKey(name: String, comment: String): ExecResult =
         run(listOf("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", "/root/.ssh/$name"), 30_000)
@@ -116,7 +140,7 @@ class GuestExec(private val appContext: Context, private val files: NetFiles) {
 
 // ============================================================ host-side facts
 
-data class Iface(val name: String, val ip: String) {
+data class Iface(val name: String, val ip: String, val prefix: Int = 24) {
     val isWifi: Boolean get() = name.startsWith("wlan") || name.startsWith("ap") || name.startsWith("swlan")
 }
 
@@ -126,7 +150,10 @@ object NetFacts {
     fun interfaces(): List<Iface> = try {
         NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
             .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
-            .flatMap { nic -> nic.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>().map { Iface(nic.name, it.hostAddress ?: "") } }
+            .flatMap { nic ->
+                nic.interfaceAddresses.filter { it.address is java.net.Inet4Address }
+                    .map { Iface(nic.name, it.address.hostAddress ?: "", it.networkPrefixLength.toInt()) }
+            }
             .filter { it.ip.isNotEmpty() && !it.ip.startsWith("169.254.") }
     } catch (_: Throwable) {
         emptyList()
@@ -161,6 +188,160 @@ object NetFacts {
             }
         } catch (_: Throwable) {
             null
+        }
+    }
+
+    // ------------------------------------------------------------------ lab
+
+    /** What one TCP connect attempt says about an address. */
+    enum class Probe { OPEN, REFUSED, SILENT }
+
+    /** OPEN = a service answered; REFUSED = the host is there and said no (a RST); SILENT = nothing came back. */
+    fun probe(host: String, port: Int, timeoutMs: Int): Probe = try {
+        Socket().use { s -> s.connect(InetSocketAddress(host, port), timeoutMs) }
+        Probe.OPEN
+    } catch (e: java.net.ConnectException) {
+        if (e.message?.contains("refused", ignoreCase = true) == true) Probe.REFUSED else Probe.SILENT
+    } catch (_: Throwable) {
+        Probe.SILENT
+    }
+
+    /** A device found by the sweep. */
+    data class Found(val ip: String, val name: String?, val open: List<Int>, val mac: String?)
+
+    /**
+     * Find the devices on the phone's own subnet: every address gets one short connect attempt; a host that
+     * answers OR actively refuses is alive. Bounded: [concurrency] sockets at once, ~[timeoutMs] each.
+     * [onProgress] gets (done, total). No raw sockets, no ICMP — a silent firewalled device can be missed.
+     */
+    fun sweep(
+        iface: Iface,
+        timeoutMs: Int = 350,
+        concurrency: Int = 48,
+        cancelled: () -> Boolean = { false },
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+    ): List<Found> {
+        val targets = LabNet.sweepTargets(iface.ip, iface.prefix)
+        if (targets.isEmpty()) return emptyList()
+        val arp = arpTable()
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(concurrency)
+        val done = java.util.concurrent.atomic.AtomicInteger(0)
+        try {
+            val futures = targets.map { ip ->
+                pool.submit<Found?> {
+                    try {
+                        if (cancelled()) return@submit null
+                        var alive = false
+                        val open = ArrayList<Int>()
+                        for (p in PortSpec.DISCOVERY) {
+                            if (cancelled()) break
+                            when (probe(ip, p, timeoutMs)) {
+                                Probe.OPEN -> { alive = true; open += p }
+                                Probe.REFUSED -> alive = true
+                                Probe.SILENT -> Unit
+                            }
+                            // A host that stays SILENT on the first port might still own others, but a full
+                            // table per dead address would take minutes: give up after the 2nd silent port.
+                            if (!alive && p == PortSpec.DISCOVERY[1]) break
+                        }
+                        if (alive) Found(ip, null, open, arp[ip]) else null
+                    } finally {
+                        onProgress(done.incrementAndGet(), targets.size)
+                    }
+                }
+            }
+            return futures.mapNotNull { runCatching { it.get() }.getOrNull() }.sortedBy { LabNet.ipv4ToInt(it.ip) ?: 0 }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    /** `/proc/net/arp` as ip → mac. Android 10+ hides it from apps, so this is often empty. */
+    fun arpTable(): Map<String, String> = try {
+        java.io.File("/proc/net/arp").readLines().drop(1).mapNotNull { line ->
+            val c = line.trim().split(Regex("\\s+"))
+            if (c.size >= 4 && c[3] != "00:00:00:00:00:00" && c[3].matches(Regex("^[0-9a-fA-F:]{17}$"))) c[0] to c[3].lowercase() else null
+        }.toMap()
+    } catch (_: Throwable) {
+        emptyMap()
+    }
+
+    /** Reverse-DNS name of [ip], or null — bounded by [timeoutMs] because the system resolver may hang. */
+    fun reverseName(ip: String, timeoutMs: Long = 1_200): String? {
+        val task = java.util.concurrent.FutureTask { InetAddress.getByName(ip).canonicalHostName }
+        Thread(task, "rdns").apply { isDaemon = true }.start()
+        return try {
+            task.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS).takeIf { it != ip && it.isNotBlank() }
+        } catch (_: Throwable) {
+            task.cancel(true)
+            null
+        }
+    }
+
+    /** Per-port answer for the port checker. */
+    fun scanPorts(host: String, ports: List<Int>, timeoutMs: Int = 800, concurrency: Int = 24): Map<Int, Probe> {
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(concurrency.coerceAtMost(ports.size.coerceAtLeast(1)))
+        try {
+            return ports.map { p -> p to pool.submit<Probe> { probe(host, p, timeoutMs) } }
+                .associate { (p, f) -> p to (runCatching { f.get() }.getOrDefault(Probe.SILENT)) }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    /** Ask [server] (or the system's idea of DNS) for [type] records of [name]. Falls back to TCP when truncated. */
+    fun dnsLookup(server: String, name: String, type: Int): Pair<DnsLookup, Long>? {
+        val id = (System.nanoTime() and 0xffff).toInt()
+        val start = System.nanoTime()
+        val query = Dns.query(name, id, type)
+        val udp = try {
+            DatagramSocket().use { sock ->
+                sock.soTimeout = 2_500
+                sock.send(DatagramPacket(query, query.size, InetAddress.getByName(server), 53))
+                val buf = ByteArray(4096)
+                val pkt = DatagramPacket(buf, buf.size)
+                sock.receive(pkt)
+                Dns.parse(buf.copyOf(pkt.length), id)
+            }
+        } catch (_: Throwable) {
+            return null
+        }
+        val ms = (System.nanoTime() - start) / 1_000_000
+        if (udp is DnsLookup.Records && udp.truncated) {
+            try {
+                Socket().use { s ->
+                    s.connect(InetSocketAddress(server, 53), 2_500); s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Dns.tcpFrame(query)); flush() }
+                    val input = java.io.DataInputStream(s.getInputStream())
+                    val len = input.readUnsignedShort()
+                    if (len in 12..65_535) {
+                        val body = ByteArray(len).also { input.readFully(it) }
+                        return Dns.parse(body, id) to (System.nanoTime() - start) / 1_000_000
+                    }
+                }
+            } catch (_: Throwable) { /* keep the truncated UDP answer */ }
+        }
+        return udp to ms
+    }
+
+    /** One health reading for a saved server: a TCP connect, then (HTTP/HTTPS) one GET. Never throws. */
+    fun health(s: LabServer): HealthReading {
+        val tcp = tcp(s.host, s.port, 2_500)
+        if (tcp == null || s.kind == LabKind.TCP) return LabHealth.classify(s.kind, tcp, null, null, null)
+        val url = LabServers.url(s) ?: return LabHealth.classify(s.kind, tcp, null, null, "no URL")
+        val t0 = System.nanoTime()
+        return try {
+            val c = URL(url).openConnection() as HttpURLConnection
+            c.instanceFollowRedirects = false; c.connectTimeout = 3_000; c.readTimeout = 4_000
+            c.requestMethod = "GET"
+            c.setRequestProperty("User-Agent", "PocketShell-HomeLab/2")
+            val code = c.responseCode
+            c.disconnect()
+            LabHealth.classify(s.kind, tcp, code, (System.nanoTime() - t0) / 1_000_000, null)
+        } catch (e: javax.net.ssl.SSLException) {
+            LabHealth.classify(s.kind, tcp, null, null, "TLS: ${e.message?.take(60) ?: "certificate not trusted"}")
+        } catch (e: Throwable) {
+            LabHealth.classify(s.kind, tcp, null, null, e.message?.take(60) ?: e.javaClass.simpleName)
         }
     }
 

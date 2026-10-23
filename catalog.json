@@ -16,16 +16,16 @@
     },
     {
       "id": "network",
-      "name": "Network",
-      "summary": "SSH hosts, keys, tunnels, folder sharing and connectivity checks for the Linux guest",
+      "name": "Network & Home Lab",
+      "summary": "Find devices on your Wi-Fi, watch your servers, DNS / ping / traceroute / port tools, SSH hosts, keys, tunnels and folder sharing",
       "author": "PocketShell",
-      "version": "1.1.0",
+      "version": "2.0.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/network.json",
       "plugin": {
         "className": "app.pocketshell.widget.network.NetworkPlugin",
-        "dex": "releases/network/1.1.0/plugin.jar",
-        "sha256": "414e4aa3ead994646e63789678ce0277ec8d542bc98e4b0310561ec8f9e643ac"
+        "dex": "releases/network/2.0.0/plugin.jar",
+        "sha256": "0db070e0974fa1930ffa82451ab5b5ae53def136c4d55559e0683358f29dab4d"
       }
     },
     {

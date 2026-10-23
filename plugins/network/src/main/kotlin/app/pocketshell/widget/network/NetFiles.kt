@@ -25,6 +25,7 @@ class NetFiles(val rootfs: File) {
     val knownHosts: File get() = File(sshDir, "known_hosts")
     private val appConfigDir: File get() = File(home, ".config/pocketshell")
     val tunnelsFile: File get() = File(appConfigDir, "network-tunnels.txt")
+    val labFile: File get() = File(appConfigDir, "network-lab.txt")
     val jobsDir: File get() = File(rootfs, "tmp/netjobs")
     val resolvConf: File get() = File(rootfs, "etc/resolv.conf")
 
@@ -132,6 +133,19 @@ class NetFiles(val rootfs: File) {
     fun writeTunnels(list: List<Tunnel>) {
         appConfigDir.mkdirs()
         atomicWrite(tunnelsFile, Tunnels.encode(list), secret = false)
+    }
+
+    // ------------------------------------------------------------ lab servers
+
+    fun readLab(): List<LabServer> = try {
+        if (labFile.isFile && labFile.length() < 64_000) LabServers.decode(labFile.readText()) else emptyList()
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    fun writeLab(list: List<LabServer>) {
+        appConfigDir.mkdirs()
+        atomicWrite(labFile, LabServers.encode(list), secret = false)
     }
 
     // ---------------------------------------------------------------- misc

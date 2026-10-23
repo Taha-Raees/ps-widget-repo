@@ -16,8 +16,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Dns
-import androidx.compose.material.icons.outlined.NetworkCheck
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.VpnKey
@@ -226,11 +227,12 @@ internal fun StatStrip(items: List<StripItem>, modifier: Modifier = Modifier) {
 
 internal val NetTab.icon: ImageVector
     get() = when (this) {
+        NetTab.LAB -> Icons.Outlined.Dashboard
+        NetTab.TOOLS -> Icons.Outlined.Search
         NetTab.HOSTS -> Icons.Outlined.Dns
         NetTab.KEYS -> Icons.Outlined.VpnKey
         NetTab.TUNNELS -> Icons.Outlined.SwapHoriz
         NetTab.SHARE -> Icons.Outlined.Share
-        NetTab.CHECKS -> Icons.Outlined.NetworkCheck
     }
 
 internal fun copyToClipboard(context: Context, label: String, text: String) {

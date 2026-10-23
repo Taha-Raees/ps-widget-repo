@@ -43,13 +43,14 @@ private sealed interface Modal {
     data class Host(val initial: SshHost?) : Modal
     data class TunnelForm(val initial: Tunnel?) : Modal
     data object NewKey : Modal
+    data class LabForm(val initial: LabServer?) : Modal
     data class Confirm(val title: String, val message: String, val label: String, val word: String?, val action: () -> Unit) : Modal
 }
 
 @Composable
 internal fun NotReady(onOpenDiagnostics: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        Text("Network", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = HomeTokens.textPrimary, modifier = Modifier.padding(top = 4.dp))
+        Text("Network & Home Lab", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = HomeTokens.textPrimary, modifier = Modifier.padding(top = 4.dp))
         MonoText(text = "Linux is not ready yet", color = HomeTokens.textDim, modifier = Modifier.padding(top = 4.dp))
         TextButton(onClick = onOpenDiagnostics) { Text("Diagnostics", color = HomeTokens.accent) }
     }
@@ -70,7 +71,7 @@ internal fun NetworkStudio(state: NetworkState, sideRail: Boolean, nav: WidgetNa
         Column(Modifier.weight(1f).fillMaxHeight().padding(start = if (sideRail) 12.dp else 0.dp)) {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Network", fontSize = 28.sp, fontWeight = FontWeight.SemiBold, color = HomeTokens.textPrimary)
+                    Text("Network & Home Lab", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = HomeTokens.textPrimary)
                     MonoText(text = statusLine(state.local?.ifaces), color = HomeTokens.textDim, fontSize = 10.sp)
                 }
                 IconAction(Icons.Outlined.Terminal, "Open terminal", onClick = { nav.openTerminal() })
@@ -86,18 +87,23 @@ internal fun NetworkStudio(state: NetworkState, sideRail: Boolean, nav: WidgetNa
             }
             StatStrip(
                 summaryItems(state.local, state.tunnelStates, state.share).mapIndexed { i, item ->
-                    item.copy(onClick = { state.tab = listOf(NetTab.HOSTS, NetTab.KEYS, NetTab.TUNNELS, NetTab.SHARE)[i]; state.detail = null })
+                    item.copy(onClick = { state.tab = listOf(NetTab.HOSTS, NetTab.LAB, NetTab.TUNNELS, NetTab.SHARE)[i]; state.detail = null })
                 },
                 modifier = Modifier.padding(top = 4.dp),
             )
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
                     when (state.tab) {
+                        NetTab.LAB -> LabTab(
+                            state, nav,
+                            onForm = { modal = Modal.LabForm(it) },
+                            onConfirm = { t, m, l, a -> modal = Modal.Confirm(t, m, l, null, a) },
+                        )
+                        NetTab.TOOLS -> ToolsTab(state, onChecks = { ChecksTab(state) })
                         NetTab.HOSTS -> HostsTab(state, nav, onModal = { modal = it })
                         NetTab.KEYS -> KeysTab(state, onModal = { modal = it })
                         NetTab.TUNNELS -> TunnelsTab(state, nav, onModal = { modal = it })
                         NetTab.SHARE -> ShareTab(state, nav)
-                        NetTab.CHECKS -> ChecksTab(state)
                     }
                 }
             }
@@ -122,6 +128,7 @@ private fun ShowModal(modal: Modal?, state: NetworkState, onDismiss: () -> Unit)
         is Modal.Host -> HostFormDialog(modal.initial, local?.keys.orEmpty(), onSave = { h, done -> state.saveHost(h, done) }, onDismiss = onDismiss)
         is Modal.TunnelForm -> TunnelFormDialog(modal.initial, local?.config?.hosts?.map { it.alias }.orEmpty(), onSave = { t, done -> state.saveTunnel(t, done) }, onDismiss = onDismiss)
         Modal.NewKey -> KeyFormDialog(local?.keys?.map { it.name }?.toSet().orEmpty(), "me@phone", onCreate = { n, c, done -> state.createKey(n, c, done) }, onDismiss = onDismiss)
+        is Modal.LabForm -> LabServerFormDialog(modal.initial, local?.config?.hosts?.map { it.alias }.orEmpty(), onSave = { sv, done -> state.saveLabServer(sv, done) }, onDismiss = onDismiss)
         is Modal.Confirm -> ConfirmDialog(modal.title, modal.message, modal.label, modal.word, onConfirm = modal.action, onDismiss = onDismiss)
     }
 }

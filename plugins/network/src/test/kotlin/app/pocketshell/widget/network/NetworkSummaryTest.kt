@@ -26,8 +26,8 @@ class NetworkSummaryTest {
     fun `the four numbers`() {
         val t = listOf(Tunnel("aaaa1111", "a", TunnelKind.LOCAL, "h", 8080, "x", 80), Tunnel("bbbb2222", "b", TunnelKind.DYNAMIC, "h", 1080))
         val items = summaryItems(snap(hosts = 3, keys = 2, tunnels = t), mapOf("aaaa1111" to TunnelState.Up(1), "bbbb2222" to TunnelState.Stopped), ShareState.Off)
-        assertEquals(listOf("3", "2", "1/2", "off"), items.map { it.value })
-        assertEquals(listOf("hosts", "keys", "tunnels up", "sharing"), items.map { it.label })
+        assertEquals(listOf("3", "0", "1/2", "off"), items.map { it.value })
+        assertEquals(listOf("hosts", "lab", "tunnels up", "sharing"), items.map { it.label })
         assertTrue(items[2].hot); assertFalse(items[3].hot)
         val sharing = summaryItems(snap(), emptyMap(), ShareState.Running("http://x/", "/d", 1, "1.1.1.1", 8000))
         assertEquals("ON", sharing[3].value); assertTrue(sharing[3].hot)

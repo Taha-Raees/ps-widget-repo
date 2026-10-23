@@ -5,13 +5,13 @@ import app.pocketshell.widget.HomeApplication
 import app.pocketshell.widget.plugin.WidgetPlugin
 
 /**
- * The plugin entry point. Network is a cockpit for the networking CLIs: ssh hosts,
- * keys, port forwards, folder sharing and connectivity checks.
+ * The plugin entry point. Network & Home Lab: find devices, watch servers, DNS / ping /
+ * traceroute / port tools, and the ssh hosts, keys, tunnels and sharing it always had.
  */
 class NetworkPlugin : WidgetPlugin {
 
     override val pluginId: String = "network"
-    override val pluginVersion: String = "1.1.0"
+    override val pluginVersion: String = "2.0.0"
 
     override fun create(androidContext: Context): HomeApplication = NetworkApp
 }

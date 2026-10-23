@@ -94,7 +94,7 @@ class NetworkContractTest {
     fun `the plugin identity is stable`() {
         assertEquals("network", NetworkPlugin().pluginId)
         assertEquals("network", NetworkApp.spec.id)
-        assertEquals("Network", NetworkApp.spec.name)
+        assertEquals("Network & Home Lab", NetworkApp.spec.name)
         assertTrue(Regex("^\\d+\\.\\d+\\.\\d+$").matches(NetworkPlugin().pluginVersion))
     }
 
@@ -103,5 +103,19 @@ class NetworkContractTest {
         for ((name, text) in all) {
             assertFalse("$name must not log", text.contains("Log.") || text.contains("println("))
         }
+    }
+
+    @Test
+    fun `the lab is bounded - capped sweep, pooled sockets, no shell text for the remote script`() {
+        val ops = src("NetworkOps.kt")
+        assertTrue("the sweep uses a fixed pool", ops.contains("newFixedThreadPool"))
+        assertTrue("the sweep honours cancel", ops.contains("cancelled()"))
+        assertEquals(254, LabNet.MAX_SWEEP_HOSTS)
+        // the ssh vitals command is passed as ONE constant argument, never built from user text
+        assertTrue(ops.contains("VitalsParse.REMOTE_SCRIPT"))
+        val vitals = ops.substringAfter("fun vitals(").substringBefore("fun generateKey")
+        assertFalse(vitals.contains("\"\$"))
+        // state validates a host before any tool touches it
+        assertTrue(src("NetworkState.kt").contains("LabNet.validHost(host)"))
     }
 }

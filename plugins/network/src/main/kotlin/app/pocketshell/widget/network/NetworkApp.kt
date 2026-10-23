@@ -39,8 +39,8 @@ object NetworkApp : HomeApplication() {
 
     override val spec = HomeAppSpec(
         id = NETWORK_PLUGIN_ID,
-        name = "Network",
-        summary = "SSH hosts, keys, tunnels, folder sharing and connectivity checks",
+        name = "Network & Home Lab",
+        summary = "Find devices, check servers, DNS, ping, traceroute and ports, plus SSH hosts, keys, tunnels and sharing",
     )
 
     @Composable

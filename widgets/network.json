@@ -1,6 +1,6 @@
 {
   "id": "network",
-  "name": "Network",
+  "name": "Network & Home Lab",
   "version": "1.0.0",
   "summary": "Saved SSH hosts in the Linux guest's ~/.ssh/config and live ssh client processes",
   "author": "PocketShell",

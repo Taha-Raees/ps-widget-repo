@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-enum class NetTab(val label: String) { HOSTS("Hosts"), KEYS("Keys"), TUNNELS("Tunnels"), SHARE("Share"), CHECKS("Checks") }
+enum class NetTab(val label: String) { LAB("Lab"), TOOLS("Tools"), HOSTS("Hosts"), KEYS("Keys"), TUNNELS("Tunnels"), SHARE("Share") }
 
 /** What the local files say right now (no network involved). */
 data class LocalSnapshot(
@@ -23,6 +23,7 @@ data class LocalSnapshot(
     val keys: List<KeyInfo>,
     val tunnels: List<Tunnel>,
     val ifaces: List<Iface>,
+    val lab: List<LabServer> = emptyList(),
 )
 
 sealed interface HostReach {
@@ -47,6 +48,14 @@ data class Banner(val text: String, val bad: Boolean)
 /** A host-key trust question waiting for the user's yes. */
 data class TrustRequest(val label: String, val host: String, val lines: List<String>, val prints: List<String>, val retestAlias: String?)
 
+/** What the TOOLS tab last produced (one result at a time). */
+sealed interface ToolResult {
+    data class DnsResult(val name: String, val type: String, val server: String, val lookup: DnsLookup?, val millis: Long?) : ToolResult
+    data class PingResult(val host: String, val outcome: PingOutcome) : ToolResult
+    data class TraceResult(val host: String, val hops: List<Hop>?, val tool: String?) : ToolResult
+    data class PortsResult(val host: String, val results: Map<Int, NetFacts.Probe>) : ToolResult
+}
+
 data class ListeningServer(val port: Int, val name: String, val lanReachable: Boolean?)
 
 /**
@@ -63,7 +72,7 @@ class NetworkState(context: Context) {
     private val exec = GuestExec(appContext, files)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    var tab by mutableStateOf(NetTab.HOSTS)
+    var tab by mutableStateOf(NetTab.LAB)
 
     /** The row (host alias / key name / tunnel id) expanded in the current tab; Back collapses it. */
     var detail by mutableStateOf<String?>(null)
@@ -88,7 +97,22 @@ class NetworkState(context: Context) {
     var checking by mutableStateOf(false)
     var busy by mutableStateOf<String?>(null)
 
+    // ---- Home Lab: devices on this network, saved servers and their health
+    var devices by mutableStateOf<List<NetFacts.Found>?>(null)
+    var scanning by mutableStateOf(false)
+    var scanProgress by mutableStateOf<Pair<Int, Int>?>(null)
+    var health by mutableStateOf<Map<String, HealthReading>>(emptyMap())
+    var healthChecking by mutableStateOf<Set<String>>(emptySet())
+    var vitals by mutableStateOf<Map<String, Vitals?>>(emptyMap())
+
+    // ---- Tools: one run at a time
+    var toolRunning by mutableStateOf<String?>(null)
+    var toolResult by mutableStateOf<ToolResult?>(null)
+
     private val live = ConcurrentHashMap<String, LiveProcess>()
+    private val scanGuard = AtomicBoolean(false)
+    private val scanCancelled = AtomicBoolean(false)
+    private val toolGuard = AtomicBoolean(false)
 
     /** Host job ids (see [HostCompat]): while one is registered the app stays alive in the background. */
     private val jobIds = ConcurrentHashMap<String, Long>()
@@ -107,7 +131,7 @@ class NetworkState(context: Context) {
         scope.launch {
             try {
                 val tunnels = files.readTunnels()
-                local = LocalSnapshot(SshConfig.parse(files.readConfig()), files.listKeys(), tunnels, NetFacts.interfaces())
+                local = LocalSnapshot(SshConfig.parse(files.readConfig()), files.listKeys(), tunnels, NetFacts.interfaces(), files.readLab())
                 loadedAtMs = System.currentTimeMillis()
                 // A tunnel with no runtime state is simply stopped.
                 tunnelStates = tunnels.associate { it.id to (tunnelStates[it.id] ?: TunnelState.Stopped) }
@@ -430,6 +454,141 @@ class NetworkState(context: Context) {
         }
     }
 
+    // -------------------------------------------------------------- home lab
+
+    /** Sweep this phone's own subnet for live devices. Bounded, cancellable, on request only. */
+    fun scanDevices() {
+        if (!scanGuard.compareAndSet(false, true)) return
+        scanCancelled.set(false)
+        scanning = true
+        scanProgress = null
+        scope.launch {
+            try {
+                val iface = NetFacts.interfaces().sortedByDescending { it.isWifi }.firstOrNull { LabNet.sweepTargets(it.ip, it.prefix).isNotEmpty() }
+                if (iface == null) {
+                    devices = emptyList()
+                    banner = Banner("No local network to scan - connect to Wi-Fi first", bad = true)
+                    return@launch
+                }
+                val found = NetFacts.sweep(iface, cancelled = { scanCancelled.get() }, onProgress = { d, t -> scanProgress = d to t })
+                devices = found
+                // Names last, a few at a time: the system resolver is slow on a home network.
+                val gate = Semaphore(8)
+                val named = found.map { f -> async { gate.withPermit { f.copy(name = NetFacts.reverseName(f.ip)) } } }.map { it.await() }
+                if (!scanCancelled.get()) devices = named
+            } catch (e: Throwable) {
+                banner = Banner("Scan failed: ${e.message ?: e.javaClass.simpleName}", bad = true)
+            } finally {
+                scanning = false
+                scanProgress = null
+                scanGuard.set(false)
+            }
+        }
+    }
+
+    fun cancelScan() { scanCancelled.set(true) }
+
+    fun saveLabServer(s: LabServer, onDone: (String?) -> Unit) {
+        LabServers.problem(s)?.let { onDone(it); return }
+        scope.launch {
+            try {
+                files.writeLab((files.readLab().filter { it.id != s.id } + s).sortedBy { it.name.lowercase() })
+                reloadLocalNow()
+                onDone(null)
+            } catch (e: Throwable) {
+                onDone("Could not save: ${e.message}")
+            }
+        }
+    }
+
+    fun deleteLabServer(id: String) {
+        scope.launch {
+            files.writeLab(files.readLab().filter { it.id != id })
+            health = health - id
+            vitals = vitals - id
+            reloadLocalNow()
+        }
+    }
+
+    /** One health reading for [server]; with an ssh alias it also reads load, memory and disk. */
+    fun checkServer(server: LabServer) {
+        if (server.id in healthChecking) return
+        healthChecking = healthChecking + server.id
+        scope.launch {
+            try {
+                health = health + (server.id to NetFacts.health(server))
+                if (server.sshAlias.isNotEmpty() && health[server.id]?.health != Health.DOWN) {
+                    vitals = vitals + (server.id to exec.vitals(server.sshAlias))
+                }
+            } finally {
+                healthChecking = healthChecking - server.id
+            }
+        }
+    }
+
+    fun checkAllServers() { local?.lab?.forEach { checkServer(it) } }
+
+    // ------------------------------------------------------------------ tools
+
+    private fun runTool(name: String, host: String?, block: suspend () -> ToolResult?) {
+        if (host != null && !LabNet.validHost(host)) { banner = Banner("\"${host.take(40)}\" is not a hostname or IPv4 address", bad = true); return }
+        if (!toolGuard.compareAndSet(false, true)) return
+        toolRunning = name
+        toolResult = null
+        scope.launch {
+            try {
+                toolResult = block()
+            } catch (e: Throwable) {
+                banner = Banner("$name failed: ${e.message ?: e.javaClass.simpleName}", bad = true)
+            } finally {
+                toolRunning = null
+                toolGuard.set(false)
+            }
+        }
+    }
+
+    fun runDns(name: String, typeName: String, server: String?) {
+        val type = Dns.TYPES[typeName] ?: return
+        val target = if (typeName == "PTR") Dns.reverseName(name) else name.trim().trimEnd('.')
+        if (target == null) { banner = Banner("A PTR lookup needs an IPv4 address", bad = true); return }
+        runTool("DNS", if (typeName == "PTR") null else target) {
+            val resolver = server?.takeIf { it.isNotBlank() }
+                ?: Checks.nameservers(files.resolvConfText()).firstOrNull()
+                ?: "1.1.1.1"
+            if (!LabNet.validHost(resolver) || LabNet.ipv4ToInt(resolver) == null) {
+                banner = Banner("The DNS server must be an IPv4 address", bad = true)
+                return@runTool null
+            }
+            val r = NetFacts.dnsLookup(resolver, target, type)
+            ToolResult.DnsResult(name.trim(), typeName, resolver, r?.first, r?.second)
+        }
+    }
+
+    fun runPing(host: String) = runTool("Ping", host.trim()) {
+        val h = host.trim()
+        when (val o = exec.ping(h)) {
+            is PingOutcome.Done -> ToolResult.PingResult(h, o)
+            is PingOutcome.CannotRun -> {
+                // The fallback is honest about being a TCP connect, not ICMP.
+                val port = listOf(443, 80, 22).firstOrNull { NetFacts.tcp(h, it, 1_500) != null }
+                if (port == null) ToolResult.PingResult(h, o)
+                else ToolResult.PingResult(h, PingOutcome.Done(PingParse.fromTcp((1..4).map { NetFacts.tcp(h, port, 2_000) }), "TCP connect to port $port (ICMP ping is not available here)"))
+            }
+        }
+    }
+
+    fun runTrace(host: String) = runTool("Traceroute", host.trim()) {
+        val r = exec.trace(host.trim())
+        ToolResult.TraceResult(host.trim(), r?.first, r?.second)
+    }
+
+    fun runPorts(host: String, spec: String) {
+        val parsed = PortSpec.parse(spec)
+        if (parsed is PortSpec.Parsed.Bad) { banner = Banner(parsed.reason, bad = true); return }
+        val ports = (parsed as PortSpec.Parsed.Ports).ports
+        runTool("Port check", host.trim()) { ToolResult.PortsResult(host.trim(), NetFacts.scanPorts(host.trim(), ports)) }
+    }
+
     // ------------------------------------------------------------------- misc
 
     fun dismissBanner() { banner = null }
@@ -437,7 +596,7 @@ class NetworkState(context: Context) {
     /** Inline reload for use inside an already-running coroutine (no guard dance). */
     private fun reloadLocalNow() {
         val tunnels = files.readTunnels()
-        local = LocalSnapshot(SshConfig.parse(files.readConfig()), files.listKeys(), tunnels, NetFacts.interfaces())
+        local = LocalSnapshot(SshConfig.parse(files.readConfig()), files.listKeys(), tunnels, NetFacts.interfaces(), files.readLab())
         tunnelStates = tunnels.associate { it.id to (tunnelStates[it.id] ?: TunnelState.Stopped) }
     }
 }

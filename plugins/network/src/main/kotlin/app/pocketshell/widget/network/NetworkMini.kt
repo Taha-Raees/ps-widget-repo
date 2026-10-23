@@ -31,7 +31,7 @@ internal fun summaryItems(local: LocalSnapshot?, states: Map<String, TunnelState
     val up = tunnels.count { states[it.id] is TunnelState.Up }
     return listOf(
         StripItem("${local?.config?.hosts?.size ?: 0}", "hosts"),
-        StripItem("${local?.keys?.size ?: 0}", "keys"),
+        StripItem("${local?.lab?.size ?: 0}", "lab"),
         StripItem("$up/${tunnels.size}", "tunnels up", hot = up > 0),
         StripItem(if (share is ShareState.Running) "ON" else "off", "sharing", hot = share is ShareState.Running),
     )
@@ -63,7 +63,7 @@ internal fun NetworkMiniCard(
         Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Network",
+                    text = NetworkApp.spec.name,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = HomeTokens.textPrimary,
