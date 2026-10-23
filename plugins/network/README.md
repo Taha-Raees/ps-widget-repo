@@ -32,13 +32,24 @@ and run a tunnel or a share.
 ## Build
 
 ```
-tools/build-plugin.sh network 1.0.0 --update-catalog
+tools/build-plugin.sh network 1.1.0 --update-catalog
 ./gradlew :plugins:network:testDebugUnitTest
 ```
+
+## 1.1.0 — limitations solved in the app
+
+- **Sharing needs no python**: the folder is served by a small read-only HTTP server inside the app (`ShareServer`).
+  Dotfiles and secret names are never served, a path cannot leave the folder (symlinks included), GET/HEAD only.
+- **CONNECT types the command** at the terminal prompt (`openTerminalWith`; never Enter). An older app only opens the
+  terminal, so the command is also copied.
+- **Host jobs** keep tunnels and shares alive in the background (see below).
+- `ss` and `ip addr` now work in the Linux shell (host bridge, app release required) - see the app's `docs/PLUGIN-HOST-SERVICES.md`.
 
 ## Known limits
 
 - Whether `ssh` runs under the plugin's exec profile on a device was **not verified in this session**; if it
   cannot, the app says "ssh could not run here" instead of blaming the host.
-- Tunnels and shares live only while PocketShell is open. No auto-reconnect.
+- Tunnels and shares are host JOBS (1.1.0): on an app with the job service they keep running when you switch apps and the
+  notification offers STOP; on an older app they live only while PocketShell is in front. Either way they end when
+  PocketShell is closed, and there is no auto-reconnect.
 - No `ss`: the listening list is the host probe's verified listeners.

@@ -22,12 +22,23 @@ class NetworkContractTest {
     private val all: Map<String, String> = dir.listFiles { f -> f.name.endsWith(".kt") }!!.associate { it.name to code(it.readText()) }
 
     @Test
-    fun `only NetworkOps can run a guest command or open a socket`() {
-        val execMarkers = listOf("ProcessBuilderGuestCommandRunner", "GuestLaunch.spec", "ProcessBuilder(", "Runtime.getRuntime", "Socket(", "DatagramSocket(", "HttpURLConnection", "openConnection")
+    fun `only NetworkOps can run a guest command`() {
+        val execMarkers = listOf("ProcessBuilderGuestCommandRunner", "GuestLaunch.spec", "ProcessBuilder(", "Runtime.getRuntime")
         for ((name, text) in all) {
             if (name in setOf("NetworkOps.kt", "GuestLaunch.kt")) continue
-            for (m in execMarkers) assertFalse("$name must not use $m — exec and sockets live in NetworkOps.kt", text.contains(m))
+            for (m in execMarkers) assertFalse("$name must not use $m - exec lives in NetworkOps.kt", text.contains(m))
         }
+    }
+
+    @Test
+    fun `only NetworkOps and ShareServer open sockets, and the server never execs`() {
+        val socketMarkers = listOf("Socket(", "DatagramSocket(", "HttpURLConnection", "openConnection")
+        for ((name, text) in all) {
+            if (name in setOf("NetworkOps.kt", "ShareServer.kt")) continue
+            for (m in socketMarkers) assertFalse("$name must not use $m", text.contains(m))
+        }
+        val server = all.getValue("ShareServer.kt")
+        for (m in listOf("ProcessBuilder", "Runtime.getRuntime", "GuestLaunch", "exec(")) assertFalse("ShareServer must not run commands ($m)", server.contains(m))
     }
 
     @Test

@@ -56,8 +56,9 @@ data class ListeningServer(val port: Int, val name: String, val lanReachable: Bo
  *  - every action is single-flight (busy flags / AtomicBoolean) and clears itself in a `finally`;
  *  - no lock is held across I/O on any path the main thread reads.
  */
-class NetworkState(appContext: Context) {
+class NetworkState(context: Context) {
 
+    private val appContext = context.applicationContext
     val files = NetFiles(appContext)
     private val exec = GuestExec(appContext, files)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -88,6 +89,9 @@ class NetworkState(appContext: Context) {
     var busy by mutableStateOf<String?>(null)
 
     private val live = ConcurrentHashMap<String, LiveProcess>()
+
+    /** Host job ids (see [HostCompat]): while one is registered the app stays alive in the background. */
+    private val jobIds = ConcurrentHashMap<String, Long>()
     private val loadGuard = AtomicBoolean(false)
     private val reachGuard = AtomicBoolean(false)
     private val listenGuard = AtomicBoolean(false)
@@ -318,10 +322,12 @@ class NetworkState(appContext: Context) {
                 return@launch
             }
             live[t.id] = proc
+            jobIds[t.id] = HostCompat.beginJob(appContext, "SSH tunnel · ${t.name}") { stopTunnel(t.id) }
             // The waiter: when the process ends, say why.
             launch {
                 val r = proc.waitForExit()
                 live.remove(t.id)
+                jobIds.remove(t.id)?.let { HostCompat.endJob(appContext, it) }
                 tunnelStates = tunnelStates + (t.id to if (proc.wasStopped) TunnelState.Stopped else TunnelState.Dropped(SshOutcome.classify(r.exitCode ?: -1, r.stderr.ifBlank { r.error.orEmpty() })))
             }
             // The detector: a local forward is up when its port accepts connections (a kernel fact).
@@ -347,12 +353,13 @@ class NetworkState(appContext: Context) {
 
     // ------------------------------------------------------------------ share
 
+    private var shareServer: ShareServer? = null
+
     fun startShare(dir: String, ip: String, port: Int, minutes: Int) {
         if (share is ShareState.Starting || share is ShareState.Running) return
         share = ShareState.Starting
         scope.launch {
             try {
-                if (!files.hasPython()) { share = ShareState.Failed("Sharing needs python3 — run: apk add python3"); return@launch }
                 val lan = ShareGuard.lanAddresses(NetFacts.interfaces().map { it.name to it.ip })
                 if (lan.none { it.second == ip }) { share = ShareState.Failed("Not on Wi-Fi: no local network address to share on"); return@launch }
                 ShareGuard.portProblem(port)?.let { share = ShareState.Failed(it); return@launch }
@@ -361,32 +368,21 @@ class NetworkState(appContext: Context) {
                 if (host == null || !host.isDirectory) { share = ShareState.Failed("That folder does not exist"); return@launch }
                 val (names, truncated) = files.scanNames(host)
                 ShareGuard.refusal(dir, names, truncated)?.let { share = ShareState.Failed(it); return@launch }
-                if (NetFacts.listening(ip, port)) { share = ShareState.Failed("Port $port is already in use"); return@launch }
                 val norm = ShareGuard.normalize(dir)!!
-                val proc = exec.start("share", ShareGuard.serverArgv(norm, ip, port))
-                live["share"] = proc
+                val server = ShareServer(host, ip, port)
+                try {
+                    server.start()
+                } catch (e: java.io.IOException) {
+                    share = ShareState.Failed(if (e is java.net.BindException) "Port $port is already in use" else (e.message ?: "Could not start the server"))
+                    return@launch
+                }
+                shareServer = server
                 val endsAt = System.currentTimeMillis() + minutes * 60_000L
+                jobIds["share"] = HostCompat.beginJob(appContext, "Sharing · $norm", expiresAfterMs = minutes * 60_000L + 30_000L) { stopShare() }
+                share = ShareState.Running(ShareGuard.url(ip, port), norm, endsAt, ip, port)
                 launch {
-                    val r = proc.waitForExit()
-                    live.remove("share")
-                    if (!proc.wasStopped) share = ShareState.Failed(SshOutcome.classify(r.exitCode ?: -1, r.stderr).let { (it as? SshOutcome.Other)?.detail } ?: r.error ?: "The server stopped")
-                    else share = ShareState.Off
-                }
-                var up = false
-                val deadline = System.currentTimeMillis() + 8_000
-                while (System.currentTimeMillis() < deadline && live["share"] === proc) {
-                    delay(300)
-                    if (NetFacts.listening(ip, port)) { up = true; break }
-                }
-                if (up) {
-                    share = ShareState.Running(ShareGuard.url(ip, port), norm, endsAt, ip, port)
-                    launch {
-                        while (live["share"] === proc && System.currentTimeMillis() < endsAt) delay(1_000)
-                        if (live["share"] === proc) proc.stop()
-                    }
-                } else if (live["share"] === proc) {
-                    proc.stop()
-                    share = ShareState.Failed("The server did not start")
+                    while (shareServer === server && System.currentTimeMillis() < endsAt) delay(1_000)
+                    if (shareServer === server) stopShare()
                 }
             } catch (e: Throwable) {
                 share = ShareState.Failed(e.message ?: e.javaClass.simpleName)
@@ -395,7 +391,11 @@ class NetworkState(appContext: Context) {
     }
 
     fun stopShare() {
-        live["share"]?.let { scope.launch { it.stop() } }
+        val server = shareServer ?: return
+        shareServer = null
+        server.stop()
+        jobIds.remove("share")?.let { HostCompat.endJob(appContext, it) }
+        share = ShareState.Off
     }
 
     // -------------------------------------------------------------- listening

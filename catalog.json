@@ -19,13 +19,13 @@
       "name": "Network",
       "summary": "SSH hosts, keys, tunnels, folder sharing and connectivity checks for the Linux guest",
       "author": "PocketShell",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/network.json",
       "plugin": {
         "className": "app.pocketshell.widget.network.NetworkPlugin",
-        "dex": "releases/network/1.0.0/plugin.jar",
-        "sha256": "fd6fdda8bcdace99832c52a4fb7e94de465cd9961b09c9f89e5abec982270d72"
+        "dex": "releases/network/1.1.0/plugin.jar",
+        "sha256": "414e4aa3ead994646e63789678ce0277ec8d542bc98e4b0310561ec8f9e643ac"
       }
     },
     {
@@ -65,13 +65,13 @@
       "name": "Sync",
       "summary": "Backup profiles — source, destination, backend, last run outcome",
       "author": "PocketShell core",
-      "version": "3.0.1",
+      "version": "3.1.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/sync.json",
       "plugin": {
         "className": "app.pocketshell.widget.sync.SyncPlugin",
-        "dex": "releases/sync/3.0.1/plugin.jar",
-        "sha256": "07dbcea5b1bb856dfd41371171754ceb01cb0eb5cd7bc5f8647c2de3dd8b2fff"
+        "dex": "releases/sync/3.1.0/plugin.jar",
+        "sha256": "6c800d82542dc88bfbccfc2167d9aa58180de953f38fa7ba9a577b88dff9d1d7"
       }
     },
     {

@@ -180,7 +180,12 @@ private fun HostsTab(state: NetworkState, nav: WidgetNav, onModal: (Modal) -> Un
         if (open) {
             val outcome = state.hostTests[h.alias]
             Row(Modifier.fillMaxWidth().padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                ActionText("Connect") { copyToClipboard(context, "ssh", "ssh ${h.alias}"); state.banner = Banner("Copied: ssh ${h.alias} — paste it in the terminal", false); nav.openTerminal() }
+                ActionText("Connect") {
+                    // The app types it at the prompt (you press Enter); an older app only opens the terminal, so copy as a fallback.
+                    val typed = HostCompat.typeInTerminal(nav, "ssh ${h.alias}")
+                    if (!typed) copyToClipboard(context, "ssh", "ssh ${h.alias}")
+                    state.banner = Banner(if (typed) "Typed at the prompt: ssh ${h.alias} — press Enter" else "Copied: ssh ${h.alias} — paste it in the terminal", false)
+                }
                 ActionText("Test", enabled = h.alias !in state.testing) { state.testHost(h.alias) }
                 ActionText("Trust key", enabled = "trust:${h.alias}" !in state.testing && h.proxyJump == null) { state.requestTrust(h) }
             }
@@ -358,7 +363,6 @@ private fun ShareTab(state: NetworkState, nav: WidgetNav) {
         }
         ShareState.Starting -> MonoText("Starting…", color = HomeTokens.textDim)
         else -> {
-            if (!state.files.hasPython()) MonoText("Sharing needs python3. In the terminal run: apk add python3", color = HomeTokens.danger, maxLines = 2)
             if (lan.isEmpty()) MonoText("Not on Wi-Fi — connect to a network to share.", color = HomeTokens.textDim)
             Field("Folder (full path)", dir, { dir = it }, hint = "/root/site")
             Field("Port", port, { port = it.filter(Char::isDigit).take(5) }, number = true)
@@ -369,7 +373,7 @@ private fun ShareTab(state: NetworkState, nav: WidgetNav) {
                 Choices(lan.map { "${it.first} ${it.second}" to it.second }, ip) { ip = it }
             }
             (state.share as? ShareState.Failed)?.let { MonoText(it.reason, color = HomeTokens.danger, maxLines = 3, modifier = Modifier.padding(top = 6.dp)) }
-            Row { ActionText("Start sharing", enabled = lan.isNotEmpty() && state.files.hasPython()) { state.startShare(dir.trim(), ip, port.toIntOrNull() ?: 0, minutes) } }
+            Row { ActionText("Start sharing", enabled = lan.isNotEmpty()) { state.startShare(dir.trim(), ip, port.toIntOrNull() ?: 0, minutes) } }
             MonoText("Plain HTTP, read-only, on your Wi-Fi address only. Folders holding keys or secrets are refused.", color = HomeTokens.textDim, maxLines = 3)
         }
     }

@@ -267,8 +267,20 @@ internal class VaultState(private val appContext: Context, private val repositor
         refreshLeftovers()
     }
 
-    private fun launch(block: suspend () -> Unit) {
-        current = scope.launch { block() }
+    /**
+     * Run [block] on the state's own scope. A [label] makes it a HOST JOB: while it runs the app stays alive in the
+     * background (a backup must survive switching apps) and the notification offers STOP, which calls [onStop].
+     * On an app without that feature this is exactly what it always was.
+     */
+    private fun launch(label: String? = null, onStop: (() -> Unit)? = null, block: suspend () -> Unit) {
+        current = scope.launch {
+            val job = label?.let { HostCompat.beginJob(appContext, it, onStop = onStop) } ?: -1L
+            try {
+                block()
+            } finally {
+                HostCompat.endJob(appContext, job)
+            }
+        }
     }
 
     fun update(op: (VaultSettings) -> VaultSettings) {
@@ -344,7 +356,7 @@ internal class VaultState(private val appContext: Context, private val repositor
         val token = CancelToken().also { jobCancel = it }
         val request = BackupRequest(settings.options, passphrase, zstdInstalled == true, st)
         job = VaultRun.Working("backup", "preparing")
-        launch {
+        launch("Backup", { token.cancel() }) {
             val outcome = engine.backup(request, token) { p -> job = VaultRun.Working("backup", p.label, p.bytes, p.total) }
             when (outcome) {
                 is BackupOutcome.Done -> {
@@ -375,7 +387,7 @@ internal class VaultState(private val appContext: Context, private val repositor
         val st = storage() ?: return
         val token = CancelToken().also { jobCancel = it }
         job = VaultRun.Working("check", "checking", 0, backup.sizeBytes)
-        launch {
+        launch("Checking ${backup.name}", { token.cancel() }) {
             job = when (val o = engine.verify(st, backup, token) { p -> job = VaultRun.Working("check", p.label, p.bytes, p.total) }) {
                 is VerifyOutcome.Match -> VaultRun.Finished(true, "${backup.name}: checksum matches (${formatSize(o.sizeBytes)})")
                 is VerifyOutcome.Mismatch -> VaultRun.Finished(false, "${backup.name}: checksum differs — the file was changed or damaged")
@@ -400,7 +412,7 @@ internal class VaultState(private val appContext: Context, private val repositor
         if (busy) return
         val token = CancelToken().also { jobCancel = it }
         job = VaultRun.Working("zstd", "installing zstd")
-        launch {
+        launch("Installing zstd", { token.cancel() }) {
             job = when (val o = engine.installZstd(token) { p -> job = VaultRun.Working("zstd", p.label) }) {
                 is StepOutcome.Done -> VaultRun.Finished(true, "zstd installed")
                 is StepOutcome.Failed -> VaultRun.Finished(false, "could not install zstd: ${o.reason}")
@@ -445,7 +457,7 @@ internal class VaultState(private val appContext: Context, private val repositor
         val token = CancelToken().also { restoreCancel = it }
         val gen = ++restoreGen
         restore = RestoreUi.Working("reading")
-        launch {
+        launch("Reading backup", { token.cancel() }) {
             val outcome = engine.inspect(source, passphrase, token) { p ->
                 if (gen == restoreGen) restore = RestoreUi.Working(p.label, p.bytes, p.total)
             }
@@ -491,7 +503,7 @@ internal class VaultState(private val appContext: Context, private val repositor
         val mode = restoreMode
         val app = restoreAppSettings
         restore = RestoreUi.Working("restoring")
-        launch {
+        launch("Restore", { token.cancel() }) {
             val outcome = engine.apply(stageId, scopes, mode, app, token) { p ->
                 if (gen == restoreGen) restore = RestoreUi.Working(p.label, p.bytes, p.total)
             }
@@ -515,7 +527,7 @@ internal class VaultState(private val appContext: Context, private val repositor
         if (busy) return
         val token = CancelToken().also { jobCancel = it }
         reinstall = VaultRun.Working("packages", "installing")
-        launch {
+        launch("Installing packages", { token.cancel() }) {
             reinstall = when (val o = engine.reinstallPackages(stageId, token) { p -> reinstall = VaultRun.Working("packages", p.label) }) {
                 is StepOutcome.Done -> VaultRun.Finished(true, "packages installed${o.detail?.let { " ($it)" } ?: ""}")
                 is StepOutcome.Failed -> VaultRun.Finished(false, "package install failed: ${o.reason}")

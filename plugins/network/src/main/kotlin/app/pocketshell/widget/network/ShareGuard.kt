@@ -66,9 +66,5 @@ object ShareGuard {
 
     fun portProblem(port: Int): String? = if (port !in MIN_PORT..MAX_PORT) "Port: $MIN_PORT–$MAX_PORT" else null
 
-    /** python3's built-in server, bound to one address, read-only, serving exactly [guestDir]. */
-    fun serverArgv(guestDir: String, bindIp: String, port: Int): List<String> =
-        listOf("python3", "-m", "http.server", port.toString(), "--bind", bindIp, "--directory", guestDir)
-
     fun url(ip: String, port: Int) = "http://$ip:$port/"
 }

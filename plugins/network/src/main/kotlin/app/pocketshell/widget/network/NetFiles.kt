@@ -138,8 +138,6 @@ class NetFiles(val rootfs: File) {
 
     fun resolvConfText(): String = try { if (resolvConf.isFile) resolvConf.readText() else "" } catch (_: Exception) { "" }
 
-    fun hasPython(): Boolean = File(rootfs, "usr/bin/python3").exists()
-
     /** Names found in [dir]'s subtree (bounded), for [ShareGuard]. */
     fun scanNames(dir: File, maxEntries: Int = 4000, maxDepth: Int = 6): Pair<List<String>, Boolean> {
         val names = ArrayList<String>()
@@ -150,8 +148,7 @@ class NetFiles(val rootfs: File) {
             for (k in kids) {
                 if (names.size >= maxEntries) { truncated = true; return }
                 names += k.name
-                // Symlinks are not followed: python's server would follow them, but a link out of the
-                // folder is a link the user made on purpose; the names above already cover what is inside.
+                // Symlinks are not followed here; the server itself refuses any link that leaves the folder.
                 if (k.isDirectory && depth < maxDepth && !Files.isSymbolicLink(k.toPath())) walk(k, depth + 1)
                 else if (k.isDirectory && depth >= maxDepth) truncated = true
             }

@@ -160,11 +160,4 @@ class NetFilesTest {
         repeat(30) { File(many, "f$it").writeText("") }
         assertTrue(files.scanNames(many, maxEntries = 10).second)
     }
-
-    @Test
-    fun `python presence is read from the rootfs`() {
-        assertFalse(files.hasPython())
-        File(root, "usr/bin").mkdirs(); File(root, "usr/bin/python3").writeText("")
-        assertTrue(files.hasPython())
-    }
 }

@@ -56,10 +56,7 @@ class ShareGuardTest {
     }
 
     @Test
-    fun `server argv binds one address, serves one directory, no shell`() {
-        val a = ShareGuard.serverArgv("/root/site", "192.168.1.5", 8000)
-        assertEquals(listOf("python3", "-m", "http.server", "8000", "--bind", "192.168.1.5", "--directory", "/root/site"), a)
-        assertFalse(a.contains("0.0.0.0"))
+    fun `the share link is plain http on the chosen address`() {
         assertEquals("http://192.168.1.5:8000/", ShareGuard.url("192.168.1.5", 8000))
     }
 

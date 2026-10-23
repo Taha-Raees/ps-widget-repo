@@ -97,6 +97,6 @@ no lock across I/O, exec only in `NetworkOps`).
 - Whether `ssh` runs under the plugin exec profile on the device is **not verified in this session**.
 - Keys are created without a passphrase (passing one on argv would leak it); passphrase-protected
   keys are detected and flagged, but BatchMode tests cannot unlock them.
-- Tunnels live only while PocketShell is alive (proot kills them with the app); no auto-reconnect in 1.0.
+- Tunnels and shares end when PocketShell is closed (proot kills them with the app); since 1.1.0 they are host jobs and survive switching apps. No auto-reconnect.
 - No `ss`: the listening list is the host probe's verified listeners, not every socket.
-- Sharing is plain HTTP with no password; it is bounded by Wi-Fi-only bind, a folder guard and an auto-stop.
+- Sharing is plain HTTP with no password; it is bounded by Wi-Fi-only bind, a folder guard and an auto-stop. Since 1.1.0 it is served by an in-app Kotlin server (no python3, no guest command).

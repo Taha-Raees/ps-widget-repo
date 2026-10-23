@@ -13,7 +13,7 @@ loads with `DexClassLoader`. Design + device evidence: `PLAN.md`.
 |---|---|
 | Catalog id | `sync` |
 | Entry class | `app.pocketshell.widget.sync.SyncPlugin` (implements `app.pocketshell.widget.plugin.WidgetPlugin`) |
-| Current version | `3.0.1` |
+| Current version | `3.1.0` |
 | Namespace | `app.pocketshell.widget.sync` |
 | Source of truth | THIS directory |
 
@@ -113,5 +113,5 @@ pre-move history.
 
 ```bash
 ./gradlew :plugins:sync:assembleDebug :plugins:sync:testDebugUnitTest
-tools/build-plugin.sh sync 3.0.1 --update-catalog   # build + dex + publish + pin sha256 in catalog.json
+tools/build-plugin.sh sync 3.1.0 --update-catalog   # build + dex + publish + pin sha256 in catalog.json
 ```

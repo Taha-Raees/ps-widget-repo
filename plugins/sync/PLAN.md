@@ -162,6 +162,8 @@ storage fakes, layout tiers, contract pins.
   the gzip pipeline is verified end to end.
 - SAF I/O is compile-checked and logic-tested through the file-backed storage; it is not
   exercised against a real document provider in this session.
-- A backup in progress dies if Android kills the app (no foreground service available
-  to a plugin).
+- **3.1.0:** every long operation (backup, restore, reading a backup, package install, checksum check) registers
+  as a HOST JOB (`PluginJobs`), so the app's foreground service keeps it alive when the user switches apps and the
+  notification offers STOP. This needs an app release with the job service; on an older app a backup still dies if
+  Android stops the app, as in 3.0.x.
 - Package restore needs network. App-settings restore needs an app restart.
