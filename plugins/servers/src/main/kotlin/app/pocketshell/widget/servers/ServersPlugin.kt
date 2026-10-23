@@ -23,7 +23,7 @@ import app.pocketshell.widget.plugin.WidgetPlugin
 class ServersPlugin : WidgetPlugin {
 
     override val pluginId: String = "servers"
-    override val pluginVersion: String = "2.1.2"
+    override val pluginVersion: String = "2.2.0"
 
     override fun create(androidContext: Context): HomeApplication = ServersApp
 }

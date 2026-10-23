@@ -2,16 +2,16 @@
   "widgets": [
     {
       "id": "servers",
-      "name": "Servers",
-      "summary": "Dev servers in the Linux guest — live endpoints, HTTP checks, process facts, system health",
+      "name": "Processes",
+      "summary": "Everything running in the Linux guest — dev servers, background jobs like Gradle, terminal sessions, and what outlives the terminal",
       "author": "PocketShell",
-      "version": "2.1.2",
+      "version": "2.2.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/servers.json",
       "plugin": {
         "className": "app.pocketshell.widget.servers.ServersPlugin",
-        "dex": "releases/servers/2.1.2/plugin.jar",
-        "sha256": "6eee1c71b724aa372bc649c3d4a1b55f3f795b8a4ac526149ff3300529d07c63"
+        "dex": "releases/servers/2.2.0/plugin.jar",
+        "sha256": "188ea35f952adf069ec3befe483fcfb84f1d35c99265bfa61b330960153fb2e0"
       }
     },
     {

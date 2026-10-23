@@ -311,7 +311,7 @@ internal fun BackHeader(onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(role = Role.Button, onClickLabel = "Back to Servers") { onBack() },
+            .clickable(role = Role.Button, onClickLabel = "Back to Processes") { onBack() },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         MonoText(text = "←", color = HomeTokens.accent, fontSize = 14)

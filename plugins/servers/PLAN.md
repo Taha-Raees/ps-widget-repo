@@ -1,3 +1,5 @@
+> **2.2.0** adds the CLEAN UP tab and three audit fixes - see README.md. The plan below is the 2.1.0 design.
+
 # Servers 2.1.0 — from "listening ports" to "what is running on this device"
 
 ## Goal (user's words)

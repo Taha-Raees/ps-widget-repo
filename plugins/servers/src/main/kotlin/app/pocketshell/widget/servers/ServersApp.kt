@@ -30,7 +30,12 @@ import app.pocketshell.widget.probe.ServerInfo
 import app.pocketshell.widget.probe.ServerProbe
 import app.pocketshell.widget.servers.ServersOps.Signal
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -93,8 +98,8 @@ object ServersApp : HomeApplication() {
 
     override val spec = HomeAppSpec(
         id = SERVERS_PLUGIN_ID,
-        name = "Servers",
-        summary = "Dev servers in the Linux guest — live endpoints, HTTP checks, process facts, system health",
+        name = "Processes",
+        summary = "Everything running in the Linux guest — dev servers, background jobs like Gradle, terminal sessions, and what outlives the terminal",
     )
 
     @Composable
@@ -215,6 +220,12 @@ object ServersApp : HomeApplication() {
     /** With nothing changing and the page hidden, the process scan still refreshes every N ticks (30 s). */
     const val PROC_SLOW_TICKS = 6
 
+    /** How often the cleanup monitor looks (only while a cleanup rule is on). */
+    const val MONITOR_MS = 60_000L
+
+    /** The monitor never stops anything on a process list older than this. */
+    const val MONITOR_MAX_STALE_MS = 90_000L
+
     /** HTTP checks per pass, hard cap (the canon itself is ≤32 ports). */
     const val HTTP_CHECK_CAP = 12
 
@@ -295,7 +306,13 @@ internal class ServersState(private val appContext: Context) {
     /** Set from the layout: the maximized page needs every tick's CPU/memory. */
     @Volatile var detailed: Boolean = false
     private var lastProcPidSet: Set<Int> = emptySet()
+    private var lastTickPidSet: Set<Int> = emptySet()
+    private var ticksSincePidChange = Int.MAX_VALUE / 2
+    private var ticksSinceFullScan = 0
     private var tickCount = 0
+
+    /** When anything on the page was last refreshed (full scan OR process pass) - what "scanned Ns ago" must show. */
+    val freshAtMs: Long get() = maxOf(lastScanAtMs, procAtMs)
 
     // ---- navigation + controls of the maximized task manager.
     var tab by mutableStateOf(StudioTab.OVERVIEW)
@@ -312,6 +329,96 @@ internal class ServersState(private val appContext: Context) {
 
     private val scanMutex = Mutex()
 
+    // ---- CLEAN UP: stop what is idle, detached and heavy - safely (see ServersCleanup.kt for the guards).
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val tracker = IdleTracker()
+    private val ledger = CleanupLedger()
+    private val signaller: CleanupSignaller = AndroidCleanupSignaller()
+    private val monitorLock = Any()
+    private var monitor: Job? = null
+    private val settingsFile: File? = try {
+        File(RuntimeStorage(appContext.noBackupFilesDir).rootfsDir, "root/.config/pocketshell/processes-cleanup.txt")
+    } catch (_: Exception) {
+        null
+    }
+
+    /** The user's rules. Persisted in the Linux home, so a Sync backup carries them to a new phone. */
+    var cleanup by mutableStateOf(CleanupSettings())
+
+    /** Everything idle long enough to show, for every rule (OFF rules show too - STOP is always a tap away). */
+    var candidates by mutableStateOf<List<CleanupCandidate>>(emptyList())
+
+    /** What the monitor did, newest first. Session-only by design. */
+    var cleanupLog by mutableStateOf<List<CleanupLogEntry>>(emptyList())
+
+    init {
+        cleanupScope.launch {
+            val text = withContext(Dispatchers.IO) { try { settingsFile?.takeIf { it.isFile }?.readText() } catch (_: Exception) { null } }
+            cleanup = CleanupSettingsCodec.decode(text)
+            syncMonitor()
+        }
+    }
+
+    fun updateCleanup(op: (CleanupSettings) -> CleanupSettings) {
+        val next = op(cleanup)
+        if (next == cleanup) return
+        cleanup = next
+        cleanupScope.launch { saveCleanup(next) }
+        syncMonitor()
+        refreshCandidates(System.currentTimeMillis())
+    }
+
+    /** "Never touch this program": the family of [entry] joins the keep list. */
+    fun keep(entry: ProcEntry) = updateCleanup { it.copy(keep = it.keep + Cleanup.family(entry.label)) }
+
+    fun unkeep(name: String) = updateCleanup { it.copy(keep = it.keep - name) }
+
+    private fun saveCleanup(s: CleanupSettings) {
+        val f = settingsFile ?: return
+        try {
+            f.parentFile?.mkdirs()
+            val tmp = File(f.parentFile, ".${f.name}.tmp")
+            tmp.writeText(CleanupSettingsCodec.encode(s))
+            java.nio.file.Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } catch (_: Exception) {
+            // The rules still apply for this session; they just won't survive a restart.
+        }
+    }
+
+    private fun refreshCandidates(nowMs: Long) {
+        candidates = Cleanup.candidates(procView, tracker, ledger, cleanup, nowMs, showFraction = 0.25)
+    }
+
+    /** The monitor exists exactly while a rule is on. */
+    private fun syncMonitor() = synchronized(monitorLock) {
+        if (cleanup.watching) {
+            if (monitor?.isActive != true) monitor = cleanupScope.launch { monitorLoop() }
+        } else {
+            monitor?.cancel()
+            monitor = null
+        }
+    }
+
+    private suspend fun monitorLoop() {
+        while (currentCoroutineContext().isActive) {
+            delay(ServersApp.MONITOR_MS)
+            if (paused) continue // the user paused the monitor: nothing is stopped behind their back
+            var now = System.currentTimeMillis()
+            if (now - procAtMs > ServersApp.MONITOR_MS - 5_000) scanProcesses()
+            if (Cleanup.dueForAuto(candidates).isEmpty()) continue
+            // Something is about to be stopped: refresh the LISTENERS first (the quiet passes do not), so a server that
+            // started since the last full scan can never look like an idle program.
+            scan()
+            now = System.currentTimeMillis()
+            if (now - procAtMs > ServersApp.MONITOR_MAX_STALE_MS) continue
+            val log = CleanupRunner.sweep(candidates, signaller, ledger, now)
+            if (log.isNotEmpty()) {
+                cleanupLog = CleanupRunner.append(cleanupLog, log)
+                refreshCandidates(now)
+            }
+        }
+    }
+
     /**
      * One gated pass. Servers: the host probe's idle gate decides. Processes:
      * when the pid set changed, on every tick while the maximized page is
@@ -320,21 +427,35 @@ internal class ServersState(private val appContext: Context) {
     suspend fun tickIfDue() {
         val pidSet = withContext(Dispatchers.IO) { probe.peekPidSet() }
         tickCount++
-        // Never scanned → scan. Otherwise the gate decides: an unchanged
-        // pid set over a serverless last snapshot costs one /proc readdir.
+        val changed = pidSet != lastTickPidSet
+        if (changed) { ticksSincePidChange = 0; lastTickPidSet = pidSet } else ticksSincePidChange++
+        ticksSinceFullScan++
         // The host probe's gate may take its own lock (a scan holds it for the whole
         // exec): ask it OFF the main thread, never from this composition-scoped coroutine.
-        val due = lastScanAtMs == 0L || withContext(Dispatchers.IO) { probe.shouldFullScan(pidSet) }
-        if (due) {
-            scan()
-            return
+        val hostDue = lastScanAtMs == 0L || withContext(Dispatchers.IO) { probe.shouldFullScan(pidSet) }
+        val plan = TickPlan.decide(
+            TickPlan.Inputs(
+                firstScan = lastScanAtMs == 0L,
+                hostGateDue = hostDue,
+                pidSetChanged = changed || pidSet != lastProcPidSet,
+                detailed = detailed,
+                ticksSincePidChange = ticksSincePidChange,
+                ticksSinceFullScan = ticksSinceFullScan,
+                tickCount = tickCount,
+            ),
+        )
+        when {
+            plan.fullScan -> scan()
+            plan.processes -> scanProcesses(refreshSystem = plan.system)
         }
-        val procsDue = detailed || pidSet != lastProcPidSet || tickCount % ServersApp.PROC_SLOW_TICKS == 0
-        if (procsDue) scanProcesses()
     }
 
     /** The process pass alone (servers untouched) — mutexed with [scan]. */
-    suspend fun scanProcesses() = scanMutex.withLock { runProcessScan(portsByPid()) }
+    suspend fun scanProcesses(refreshSystem: Boolean = false) = scanMutex.withLock {
+        runProcessScan(portsByPid())
+        // The system strip rode only on full scans, so a quiet machine's load/memory froze while processes moved.
+        if (refreshSystem) system = withContext(Dispatchers.IO) { factsReader.read() }
+    }
 
     private fun portsByPid(): Map<Int, List<Int>> =
         (ui as? ServersUi.Ready)?.servers.orEmpty()
@@ -347,6 +468,9 @@ internal class ServersState(private val appContext: Context) {
         lastProcPidSet = snap.pidSet
         procAtMs = snap.atMs
         procView = ProcViews.build(snap.records, snap.cpu, ports)
+        // Every process pass - the page's own ticks and the monitor's - feeds the idle tracker.
+        tracker.observe(procView, snap.atMs)
+        refreshCandidates(snap.atMs)
         // A selection whose process vanished degrades to the list — never a
         // stale detail page for a dead pid.
         selectedPid?.let { pid -> if (procView.byPid[pid] == null) selectedPid = null }
@@ -357,6 +481,7 @@ internal class ServersState(private val appContext: Context) {
      * process facts → system strip → state. Every stage degrades alone.
      */
     suspend fun scan() = scanMutex.withLock {
+        ticksSinceFullScan = 0
         val snapshot = withContext(Dispatchers.IO) { probe.snapshot() }
         lastScanAtMs = System.currentTimeMillis()
         if (!probe.lastScanSawProcesses) {

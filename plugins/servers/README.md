@@ -1,4 +1,31 @@
-# servers — the server monitor plugin
+# servers — the Processes plugin (id `servers`)
+
+> Renamed **Processes** in 2.2.0: it shows servers, background jobs like Gradle, terminal sessions and what outlives the terminal,
+> which "Servers" undersold. The id stays `servers` (Home layouts refer to it).
+
+## 2.2.0 - CLEAN UP, and an audit of what every page shows
+
+**CLEAN UP tab** (also a one-line nudge on the card and a row on the Overview). Two rules, both **OFF** until you turn them on, each
+**Off / Ask me / Auto**: *Build daemons* (Gradle / Kotlin / Maven daemons - they restart on demand) and *Heavy and idle* (detached
+programs using 500 MB+ that have done nothing for an hour+). A process counts as idle only if it **and everything below it** used
+under 1 % CPU in every look for the whole window; a gap in our looking is unknown, never idle. Never touched by any rule: terminals,
+tmux/screen, anything that serves a port, agents (Claude, Codex...), ssh/rsync/tar/git and other transfers, anything started from a
+terminal that is still open, and programs you mark KEEP. Auto sends **SIGTERM only**, re-identifies the process right before, stops
+at most 3 per check (once a minute), does a fresh full scan first, refuses a "heavy" program that holds network sockets, and stops
+auto-stopping a program that keeps coming back or ignores the signal. Rules are stored in `~/.config/pocketshell/processes-cleanup.txt`
+(a Sync backup carries them). The design and its tests are in `ServersCleanup.kt` / `ServersCleanupTest.kt`.
+
+**Audit fixes** (found by reading how each page is fed, then pinned by `TickPlanTest`):
+1. A server that **binds its port seconds after its process starts** (every dev server) was invisible until another process started or
+   you tapped refresh - the host probe's idle gate skips a quiet machine. Full scans now continue for 60 s after the process set changes
+   and recheck periodically while a page is open.
+2. On a quiet machine the **device strip (load / memory) and the "scanned Ns ago" label froze** while the process list moved: only a full
+   scan wrote them. A process pass on the maximized page now refreshes both.
+3. (Found in the cleanup's own design) a Gradle daemon **listens on a loopback port for IPC**, so a naive "serves a port" guard would have
+   silently disabled the build rule; build daemons are exempt from that guard, everything else that listens is untouchable.
+
+`ServersRealProcessTest` runs the scanner, CPU measurement, classification, idle tracking, guards, identity re-check and an actual
+SIGTERM against **real processes** on the machine's /proc.
 
 The `servers` widget as a compiled plugin. 2.0.0 was the manifest→plugin
 graduation (the same jump git and sync took): the v1 `widgets/servers.json`

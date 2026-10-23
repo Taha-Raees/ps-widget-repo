@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Memory
@@ -62,6 +63,7 @@ internal enum class StudioTab(val label: String, val icon: ImageVector) {
     SERVERS("Servers", Icons.Outlined.Dns),
     BACKGROUND("Background", Icons.Outlined.Memory),
     SESSIONS("Sessions", Icons.Outlined.Terminal),
+    CLEANUP("Clean up", Icons.Outlined.CleaningServices),
 }
 
 @Composable
@@ -131,6 +133,13 @@ internal fun ServersStudio(
                             onTab = ::selectTab,
                             onOpenEntry = ::openEntry,
                         )
+                        CleanupOverviewRow(state) { selectTab(StudioTab.CLEANUP) }
+                        Spacer(Modifier.height(16.dp))
+                        StateFooter(state)
+                    }
+
+                    StudioTab.CLEANUP -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                        CleanupBody(state, actions)
                         Spacer(Modifier.height(16.dp))
                         StateFooter(state)
                     }
@@ -149,7 +158,7 @@ internal fun ServersStudio(
                                 paused = state.paused,
                                 query = state.query,
                                 sort = state.sort,
-                                lastScanAtMs = state.lastScanAtMs,
+                                lastScanAtMs = state.freshAtMs,
                                 selectedPort = selectedServer?.port,
                                 onQueryChange = { state.query = it },
                                 onSortChange = { state.sort = it },
@@ -284,7 +293,7 @@ private fun StudioTopBar(state: ServersState, servers: List<ServerInfo>, procs: 
     Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f).padding(bottom = 6.dp)) {
             Text(
-                text = "Servers",
+                text = "Processes",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = HomeTokens.textPrimary,
@@ -305,10 +314,29 @@ private fun StudioTopBar(state: ServersState, servers: List<ServerInfo>, procs: 
     }
 }
 
+/** One line on the overview: what the cleanup is doing, tap to open it. */
+@Composable
+private fun CleanupOverviewRow(state: ServersState, onOpen: () -> Unit) {
+    SectionLabel("CLEAN UP", Modifier.padding(top = 16.dp, bottom = 4.dp))
+    Rule()
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Open clean up") { onOpen() }.padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MonoText(
+            text = CleanupText.overviewLine(state.cleanup, state.candidates),
+            color = if (state.cleanup.watching) HomeTokens.accent else HomeTokens.textDim,
+            modifier = Modifier.weight(1f),
+        )
+        MonoText(text = "OPEN", color = HomeTokens.accent, fontSize = 11)
+    }
+    Rule()
+}
+
 /** The honest state line + checked-at stamp, at the foot of the overview. */
 @Composable
 private fun StateFooter(state: ServersState) {
-    val ageSec = if (state.lastScanAtMs == 0L) null else (System.currentTimeMillis() - state.lastScanAtMs) / 1000.0
+    val ageSec = if (state.freshAtMs == 0L) null else (System.currentTimeMillis() - state.freshAtMs) / 1000.0
     val line = when {
         state.ui is ServersUi.Probing -> "Looking…"
         state.ui is ServersUi.Unavailable -> "Linux not ready"

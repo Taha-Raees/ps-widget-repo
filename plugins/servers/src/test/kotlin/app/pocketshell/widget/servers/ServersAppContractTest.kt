@@ -16,16 +16,18 @@ class ServersAppContractTest {
     fun `the plugin answers to the catalog id and version`() {
         val plugin = ServersPlugin()
         assertEquals("servers", plugin.pluginId)
-        assertEquals("2.1.2", plugin.pluginVersion)
+        assertEquals("2.2.0", plugin.pluginVersion)
     }
 
     @Test
     fun `the application id matches the catalog entry it replaces`() {
         assertEquals("servers", ServersApp.SERVERS_PLUGIN_ID)
         assertEquals("servers", ServersApp.spec.id)
-        assertEquals("Servers", ServersApp.spec.name)
+        assertEquals("Processes", ServersApp.spec.name)
+        // The id never changes with the name: Home layouts and the catalog refer to it.
+        assertEquals("servers", ServersApp.spec.id)
         // The summary states the monitor's facts, never a promise of data.
-        assertTrue(ServersApp.spec.summary.contains("Dev servers"))
+        assertTrue(ServersApp.spec.summary.contains("dev servers") && ServersApp.spec.summary.contains("Gradle"))
     }
 
     @Test

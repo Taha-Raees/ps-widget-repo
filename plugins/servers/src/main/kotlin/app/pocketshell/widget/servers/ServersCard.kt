@@ -88,8 +88,11 @@ internal object CardRows {
      * and a clipped footer would hide the one line that matters. Always at
      * least one row, never more than the tier's cap.
      */
-    fun rowsThatFit(heightDp: Float, layout: ServersLayout): Int =
-        ((heightDp - HEADER_DP - FOOTER_DP) / rowDp(layout)).toInt().coerceIn(1, layout.cardRows)
+    fun rowsThatFit(heightDp: Float, layout: ServersLayout, extraFooterDp: Float = 0f): Int =
+        ((heightDp - HEADER_DP - FOOTER_DP - extraFooterDp) / rowDp(layout)).toInt().coerceIn(1, layout.cardRows)
+
+    /** The cleanup nudge line, when the card shows one, takes this much of the footer. */
+    const val NUDGE_DP = 18f
 
     /** (servers up, background, sessions) — the headline counts. */
     fun counts(servers: List<ServerInfo>, procs: ProcView): Triple<Int, Int, Int> =
@@ -109,19 +112,21 @@ internal fun CardOverview(
     onOpenProcess: (ProcEntry) -> Unit,
     onOpenLinuxShell: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    /** The cleanup's one-line nudge ("2 IDLE · 1.4 GB CAN BE STOPPED"); null when there is none. */
+    cleanupLine: String? = null,
 ) {
     val rows = CardRows.build(servers, procs)
     val (up, bg, ses) = CardRows.counts(servers, procs)
     val outlive = procs.outlive.size
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-    val shown = rows.take(CardRows.rowsThatFit(maxHeight.value, layout))
+    val shown = rows.take(CardRows.rowsThatFit(maxHeight.value, layout, if (cleanupLine != null) CardRows.NUDGE_DP else 0f))
     val hidden = rows.size - shown.size
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Text(
-                text = "Servers",
+                text = "Processes",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = HomeTokens.textPrimary,
@@ -156,6 +161,9 @@ internal fun CardOverview(
             color = if (ui is ServersUi.Ready && outlive > 0) HomeTokens.accent else HomeTokens.textDim,
             fontSize = 11,
         )
+        if (cleanupLine != null) {
+            MonoText(text = cleanupLine, color = HomeTokens.accent, fontSize = 11, modifier = Modifier.padding(top = 2.dp))
+        }
         if (ui is ServersUi.Ready && rows.isEmpty()) {
             Text(
                 text = "Start a server in a terminal — it appears here when it listens.",
