@@ -29,6 +29,20 @@
       }
     },
     {
+      "id": "guiapps",
+      "name": "GUI Apps",
+      "summary": "Discover, install and launch desktop apps for the Linux guest - musl (Alpine) and glibc (AppImage), arm64",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "releases/guiapps/1.0.0/catalog-entry-unused.json",
+      "plugin": {
+        "className": "app.pocketshell.widget.guiapps.GuiAppsPlugin",
+        "dex": "releases/guiapps/1.0.0/plugin.jar",
+        "sha256": "f02fe7a419e49c8b89e219d51d768843b6fef2d43e0339bcea5c7d7dd0a7b581"
+      }
+    },
+    {
       "id": "ssh",
       "name": "SSH",
       "summary": "Saved SSH hosts in the Linux guest's ~/.ssh/config and live ssh client processes",
