@@ -57,6 +57,20 @@
       }
     },
     {
+      "id": "packages",
+      "name": "Packages",
+      "summary": "Add, update and remove Linux packages and CLI tool bundles; repositories, cache and repair",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "releases/packages/1.0.0/catalog-entry-unused.json",
+      "plugin": {
+        "className": "app.pocketshell.widget.packages.PackagesPlugin",
+        "dex": "releases/packages/1.0.0/plugin.jar",
+        "sha256": "6185a23048d4fd81d58aa0b27b9d26b5eb0d7886e94ca313db8ce979dc21d204"
+      }
+    },
+    {
       "id": "ssh",
       "name": "SSH",
       "summary": "Saved SSH hosts in the Linux guest's ~/.ssh/config and live ssh client processes",
