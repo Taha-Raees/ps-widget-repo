@@ -43,6 +43,20 @@
       }
     },
     {
+      "id": "serverhub",
+      "name": "Server Hub",
+      "summary": "Start and manage web servers, local APIs and self-hosted services - ports, logs, health, restart controls and links",
+      "author": "PocketShell",
+      "version": "1.0.0",
+      "minAppVersion": "0.13.0",
+      "file": "releases/serverhub/1.0.0/catalog-entry-unused.json",
+      "plugin": {
+        "className": "app.pocketshell.widget.serverhub.ServerHubPlugin",
+        "dex": "releases/serverhub/1.0.0/plugin.jar",
+        "sha256": "43f151bd284eb1a386c7773099c7c4fbad098775b1781a5206bbbc02071ae3db"
+      }
+    },
+    {
       "id": "ssh",
       "name": "SSH",
       "summary": "Saved SSH hosts in the Linux guest's ~/.ssh/config and live ssh client processes",
