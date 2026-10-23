@@ -135,10 +135,17 @@ object SyncApp : HomeApplication() {
     /** The registry id (HomeApplications registers this application). */
     const val SYNC_ID = "sync"
 
+    /**
+     * The rsync / rclone PROFILES (the old SYNC tab) are switched off: this application is now Backup & Restore
+     * only. The profile screens, probe and records are still in the source, dormant - nothing composes them and
+     * nothing probes while this is false. Saved profiles are not deleted.
+     */
+    const val PROFILES_ENABLED = false
+
     override val spec = HomeAppSpec(
         id = SYNC_ID,
-        name = "Sync",
-        summary = "Backup/sync profiles — probed backends, dry-run previews, additive-only runs",
+        name = "Backup & Restore",
+        summary = "Back up your Linux home, packages and settings to one portable file - and restore it on a new phone",
     )
 
     @Composable
@@ -189,6 +196,14 @@ object SyncApp : HomeApplication() {
                 state.ui = SyncUi.Unavailable
                 return@LaunchedEffect
             }
+            if (!PROFILES_ENABLED) {
+                // Backup & Restore has nothing to probe: only the clock behind "Last backup 2h ago" refreshes,
+                // once, each time the card settles on screen.
+                snapshotFlow { onScreen.value }.distinctUntilChanged().collectLatest { shown ->
+                    if (shown) state.nowMs = System.currentTimeMillis()
+                }
+                return@LaunchedEffect
+            }
             lifecycleOwner.lifecycle.currentStateFlow
                 .map { it.isAtLeast(Lifecycle.State.RESUMED) }
                 .distinctUntilChanged()
@@ -222,6 +237,7 @@ object SyncApp : HomeApplication() {
         // the first thing the user wants to know); the first emission is
         // skipped when a scan already covered it — the open-race dedupe.
         LaunchedEffect(profilesState, context.runtimeState) {
+            if (!PROFILES_ENABLED) return@LaunchedEffect
             val list = profilesState ?: return@LaunchedEffect
             state.profilesRef.value = list
             if (context.runtimeState != RuntimeState.READY) return@LaunchedEffect
@@ -461,8 +477,10 @@ object SyncApp : HomeApplication() {
             }
             if (screenLayout.isStudio) {
                 SyncStudio(vault, maxWidth.value, state.nowMs) { profilesContent(SyncLayout.ROOMY, true) }
-            } else {
+            } else if (PROFILES_ENABLED) {
                 profilesContent(screenLayout, false)
+            } else {
+                BackupCard(vault, state.nowMs, ready = context.runtimeState == RuntimeState.READY, onOpenDiagnostics = { context.nav.openDiagnostics() })
             }
         }
     }

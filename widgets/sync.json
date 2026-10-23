@@ -1,6 +1,6 @@
 {
   "id": "sync",
-  "name": "Sync",
+  "name": "Backup & Restore",
   "version": "1.0.0",
   "summary": "Backup profiles — source, destination, backend, last run outcome",
   "author": "PocketShell core",

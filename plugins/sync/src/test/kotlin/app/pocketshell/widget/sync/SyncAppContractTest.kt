@@ -364,7 +364,7 @@ class SyncAppContractTest {
     fun `the spec carries the registry identity`() {
         assertEquals(SyncApp.SYNC_ID, SyncApp.spec.id)
         assertEquals("sync", SyncApp.spec.id)
-        assertEquals("Sync", SyncApp.spec.name)
+        assertEquals("Backup & Restore", SyncApp.spec.name)
         assertTrue(SyncApp.spec.summary.isNotBlank())
     }
 }

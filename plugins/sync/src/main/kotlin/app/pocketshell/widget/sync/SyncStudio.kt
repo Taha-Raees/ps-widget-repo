@@ -73,7 +73,12 @@ import app.pocketshell.ui.theme.TerminalTheme
 internal enum class StudioTab(val label: String, val icon: ImageVector) {
     BACKUP("Backup", Icons.Outlined.CloudUpload),
     RESTORE("Restore", Icons.Outlined.Restore),
-    SYNC("Sync", Icons.Outlined.Sync),
+    SYNC("Sync", Icons.Outlined.Sync);
+
+    companion object {
+        /** The tabs the page shows: SYNC (rsync/rclone profiles) only while [SyncApp.PROFILES_ENABLED]. */
+        val visible: List<StudioTab> get() = entries.filter { it != SYNC || SyncApp.PROFILES_ENABLED }
+    }
 }
 
 /** The two system-picker launches, remembered per composition. */
@@ -124,14 +129,14 @@ internal fun SyncStudio(
 
     Column(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp)) {
-            Text(text = "Sync", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = HomeTokens.textPrimary)
+            Text(text = SyncApp.spec.name, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = HomeTokens.textPrimary)
             VaultSummaryLine(vault, nowMs)
         }
         Rule()
         Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (rail) {
                 Column(modifier = Modifier.width(88.dp).fillMaxHeight()) {
-                    StudioTab.entries.forEach { t -> NavItem(t, t == vault.tab, ruleOnTop = false, modifier = Modifier.fillMaxWidth()) { vault.tab = t } }
+                    StudioTab.visible.forEach { t -> NavItem(t, t == vault.tab, ruleOnTop = false, modifier = Modifier.fillMaxWidth()) { vault.tab = t } }
                 }
                 Box(Modifier.width(1.dp).fillMaxHeight().background(HomeTokens.hairline))
             }
@@ -153,7 +158,7 @@ internal fun SyncStudio(
             Column {
                 Rule()
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    StudioTab.entries.forEach { t -> NavItem(t, t == vault.tab, ruleOnTop = true, modifier = Modifier.weight(1f)) { vault.tab = t } }
+                    StudioTab.visible.forEach { t -> NavItem(t, t == vault.tab, ruleOnTop = true, modifier = Modifier.weight(1f)) { vault.tab = t } }
                 }
             }
         }
@@ -801,5 +806,24 @@ internal fun VaultCardHeader(vault: VaultState, nowMs: Long) {
             }
         }
         Rule()
+    }
+}
+
+/**
+ * The card (not the maximized page): the title and the one-line backup status with its BACK UP NOW action.
+ * Restore, scope and encryption live on the maximized page. Pure view of the vault state - no probe, no exec.
+ */
+@Composable
+internal fun BackupCard(vault: VaultState, nowMs: Long, ready: Boolean, onOpenDiagnostics: () -> Unit) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(text = SyncApp.spec.name, fontSize = 24.sp, fontWeight = FontWeight.SemiBold, color = HomeTokens.textPrimary, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+        Rule()
+        if (!ready) {
+            VText("Linux is not ready yet", color = HomeTokens.textDim, size = 11, modifier = Modifier.padding(top = 8.dp))
+            VAction("DIAGNOSTICS", onClick = onOpenDiagnostics)
+        } else {
+            VaultCardHeader(vault, nowMs)
+            VText("Open this card for restore, what is included and encryption.", color = HomeTokens.textDim, size = 10, lines = 2)
+        }
     }
 }

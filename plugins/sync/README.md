@@ -1,4 +1,11 @@
-# plugins/sync — the Sync widget (compiled plugin)
+# plugins/sync - Backup & Restore (compiled plugin)
+
+**3.2.0 renames the Sync widget to Backup & Restore.** The catalog id and entry class stay `sync` /
+`SyncPlugin`, so existing installs update in place. The application is now backup and restore only: the studio has
+two tabs (BACKUP, RESTORE) and the Home card shows the backup status with BACK UP NOW. The old rsync / rclone
+**profiles** (the SYNC tab) are switched off by `SyncApp.PROFILES_ENABLED = false` - nothing composes them and nothing
+probes; the code and any saved profiles are still there, so turning them back on is a one-line change if they are ever
+wanted again. Everything below about backup, restore and the `.psbak` format is unchanged.
 
 The **Sync** Home Application as a compiled widget plugin. **3.0.0 is "take my
 Linux with me"**: back up your Linux home, package list and a small allow-list of

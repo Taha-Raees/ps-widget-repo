@@ -5,17 +5,17 @@ import app.pocketshell.widget.HomeApplication
 import app.pocketshell.widget.plugin.WidgetPlugin
 
 /**
- * M8.5 — the plugin entry point for the SYNC application (RUN NOW, path
- * completion, Android-storage destinations — the full compiled app).
+ * The plugin entry point for BACKUP & RESTORE (id stays `sync`, so installs update in place): your Linux home,
+ * package list and a small allow-list of app settings as one portable, optionally encrypted file you can choose
+ * from storage on a new phone.
  *
- * 3.0.0 adds BACKUP and RESTORE: your Linux home, package list and a small
- * allow-list of app settings as one portable, optionally encrypted file you
- * can choose from storage on a new phone. The rsync/rclone profiles remain.
+ * 3.2.0: renamed from "Sync". The rsync / rclone profiles (the SYNC tab) are switched off - see
+ * [SyncApp.PROFILES_ENABLED]; saved profiles are not deleted.
  */
 class SyncPlugin : WidgetPlugin {
 
     override val pluginId: String = "sync"
-    override val pluginVersion: String = "3.1.0"
+    override val pluginVersion: String = "3.2.0"
 
     override fun create(androidContext: Context): HomeApplication = SyncApp
 }

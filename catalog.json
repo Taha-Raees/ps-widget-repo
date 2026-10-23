@@ -62,16 +62,16 @@
     },
     {
       "id": "sync",
-      "name": "Sync",
-      "summary": "Backup profiles — source, destination, backend, last run outcome",
+      "name": "Backup & Restore",
+      "summary": "Back up your Linux home, packages and settings to one portable (optionally encrypted) file - and restore it on a new phone",
       "author": "PocketShell core",
-      "version": "3.1.0",
+      "version": "3.2.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/sync.json",
       "plugin": {
         "className": "app.pocketshell.widget.sync.SyncPlugin",
-        "dex": "releases/sync/3.1.0/plugin.jar",
-        "sha256": "6c800d82542dc88bfbccfc2167d9aa58180de953f38fa7ba9a577b88dff9d1d7"
+        "dex": "releases/sync/3.2.0/plugin.jar",
+        "sha256": "7527f6858e3d3697f5828b6d5f2504baa8350e13f681e6a36472ceb0f851cf0a"
       }
     },
     {
