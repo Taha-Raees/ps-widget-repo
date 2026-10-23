@@ -31,7 +31,7 @@ Compiled plugins are the deliberate exception, and they are gated twice:
 ```
 catalog.json                 the index the app fetches (HTTPS only)
 widgets/*.json               data-manifest widgets (probe + card template)
-plugins/git|sync|hello/      CANONICAL SOURCES of the compiled plugins
+plugins/<id>/                CANONICAL SOURCES of the compiled plugins
 api/pocketshell-api.jar     host API jar the plugins compile against
 api/PROVENANCE.md            where that jar came from + refresh procedure
 releases/<id>/<version>/plugin.jar   published artifacts (classes.dex inside)
@@ -44,15 +44,39 @@ tools/validate-catalog.py    validate catalog.json (CI gate)
 | id | entry class | version | sources |
 |----|-------------|---------|---------|
 | `git` | `app.pocketshell.widget.git.GitPlugin` | 3.4.2 | `plugins/git/` |
-| `sync` | `app.pocketshell.widget.sync.SyncPlugin` | 3.1.0 | `plugins/sync/` |
+| `sync` — **Backup & Restore** | `app.pocketshell.widget.sync.SyncPlugin` | 3.2.0 | `plugins/sync/` |
 | `servers` | `app.pocketshell.widget.servers.ServersPlugin` | 2.2.0 | `plugins/servers/` |
-| `network` | `app.pocketshell.widget.network.NetworkPlugin` | 1.1.0 | `plugins/network/` |
+| `network` — **Network & Home Lab** | `app.pocketshell.widget.network.NetworkPlugin` | 2.0.0 | `plugins/network/` |
+| `guiapps` — **GUI Apps** | `app.pocketshell.widget.guiapps.GuiAppsPlugin` | 1.0.0 | `plugins/guiapps/` |
+| `serverhub` — **Server Hub** | `app.pocketshell.widget.serverhub.ServerHubPlugin` | 1.0.0 | `plugins/serverhub/` |
+| `packages` — **Packages** | `app.pocketshell.widget.packages.PackagesPlugin` | 1.0.0 | `plugins/packages/` |
 | `hello` | `repo.hello.HelloPlugin` | 1.0.0 | `plugins/hello/` (minimal shape — start new plugins here) |
 
 Each module has its own README. The plugins compile against the checked-in
 host API jar (`api/pocketshell-api.jar`, provenance + refresh
 procedure in `api/PROVENANCE.md`) and the same Compose stack the host ships
 — none of that is dexed into the artifacts.
+
+The three newest plugins share one small UI/ops kit (`Kit.kt`, `Guest.kt`,
+`GuestLaunch.kt`, `HostCompat.kt`, `Visibility.kt`, each copied per module on
+purpose - a plugin never depends on another plugin) and one source-level
+contract test (`ContractTest.kt`): only the guest layer starts processes, only
+the ops file opens sockets, nothing polls, state runs on its own scope.
+
+- **GUI Apps** - a curated arm64 library of desktop apps in two flavours:
+  musl (Alpine packages, `apk add`) and glibc (the projects' own AppImages,
+  SHA-256 checked against the release). Launches into the host's desktop
+  session (`WAYLAND_DISPLAY=psgui`).
+- **Server Hub** - start and manage web servers, local APIs and self-hosted
+  services: ports, logs, health, restart controls, access links.
+- **Packages** - add / update / remove apk packages and CLI tool bundles,
+  every change simulated and confirmed first; repositories, cache, repair.
+- **Network & Home Lab** (the old Network plugin, 2.0.0) - device discovery,
+  DNS / ping / traceroute / port tools, server health, plus SSH hosts, keys,
+  tunnels and folder sharing.
+- **Backup & Restore** (the old Sync plugin, 3.2.0) - renamed; the id stays
+  `sync` so installs update in place. The rsync / rclone profiles are switched
+  off (`SyncApp.PROFILES_ENABLED`), saved profiles are not deleted.
 
 The `servers` plugin is the manifest→plugin graduation (like git and sync
 before it): the v1 `widgets/servers.json` six-line listener card becomes
@@ -80,8 +104,8 @@ build-tools `36.1.0` (what the app itself builds with).
 ### Build + test
 
 ```bash
-./gradlew :plugins:hello:assembleDebug :plugins:git:assembleDebug :plugins:sync:assembleDebug :plugins:servers:assembleDebug :plugins:network:assembleDebug
-./gradlew :plugins:git:testDebugUnitTest :plugins:sync:testDebugUnitTest :plugins:servers:testDebugUnitTest :plugins:network:testDebugUnitTest
+./gradlew :plugins:hello:assembleDebug :plugins:git:assembleDebug :plugins:sync:assembleDebug :plugins:servers:assembleDebug :plugins:network:assembleDebug :plugins:guiapps:assembleDebug :plugins:serverhub:assembleDebug :plugins:packages:assembleDebug
+./gradlew testDebugUnitTest      # every module
 ```
 
 ### Publish (build + dex + release + catalog pin)
@@ -153,7 +177,7 @@ unit tests on every push/PR.
 Plugin versions are INDEPENDENT of the PocketShell app version:
 
 - PocketShell app: `0.14.0-m8.5` (the host)
-- Git plugin: `3.4.2` · Sync plugin: `3.1.0` · Processes plugin (`servers`): `2.2.0` · Network plugin: `1.1.0` · Hello plugin: `1.0.0`
+- Git plugin: `3.4.2` · Backup & Restore (`sync`): `3.2.0` · Processes plugin (`servers`): `2.2.0` · Network & Home Lab: `2.0.0` · GUI Apps: `1.0.0` · Server Hub: `1.0.0` · Packages: `1.0.0` · Hello plugin: `1.0.0`
 
 PocketShell compares the catalog entry's `version` against the installed
 plugin's version (semver, compared major→minor→patch). A newer catalog

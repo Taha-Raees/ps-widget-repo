@@ -32,5 +32,15 @@ jobs:
             :plugins:hello:assembleDebug \
             :plugins:git:assembleDebug \
             :plugins:sync:assembleDebug \
+            :plugins:servers:assembleDebug \
+            :plugins:network:assembleDebug \
+            :plugins:guiapps:assembleDebug \
+            :plugins:serverhub:assembleDebug \
+            :plugins:packages:assembleDebug \
             :plugins:git:testDebugUnitTest \
-            :plugins:sync:testDebugUnitTest
+            :plugins:sync:testDebugUnitTest \
+            :plugins:servers:testDebugUnitTest \
+            :plugins:network:testDebugUnitTest \
+            :plugins:guiapps:testDebugUnitTest \
+            :plugins:serverhub:testDebugUnitTest \
+            :plugins:packages:testDebugUnitTest
