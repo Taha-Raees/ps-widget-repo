@@ -80,9 +80,11 @@ internal class FakeDevice(val name: String = "Test Phone") {
 
     /** A realistic little Linux home. */
     fun populate(): FakeDevice {
-        write("etc/apk/world", "alpine-baselayout\nbash\ngit\nopenjdk21\n")
-        write("etc/apk/repositories", "https://dl-cdn.alpinelinux.org/alpine/v3.24/main\n")
-        write("etc/alpine-release", "3.24.2\n")
+        // apt's manual set: base-files, bash, git, openjdk-21-jdk-headless (libc6 is automatic, vim removed)
+        write("var/lib/dpkg/status", "Package: base-files\nStatus: install ok installed\nVersion: 13.8\n\nPackage: libc6\nStatus: install ok installed\nVersion: 2.41-12\n\nPackage: bash\nStatus: install ok installed\nVersion: 5.2.37-2\n\nPackage: git\nStatus: install ok installed\nVersion: 1:2.47.3-0\n\nPackage: openjdk-21-jdk-headless\nStatus: install ok installed\nVersion: 21.0.12\n\nPackage: vim\nStatus: deinstall ok config-files\nVersion: 2:9.1\n")
+        write("var/lib/apt/extended_states", "Package: libc6\nArchitecture: arm64\nAuto-Installed: 1\n")
+        write("etc/apt/sources.list.d/debian.sources", "Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie\n")
+        write("etc/debian_version", "13.7\n")
         write("root/proj/src/a.kt", "fun main() = println(\"hello\")\n", executable = true)
         write("root/proj/node_modules/pkg/index.js", "junk\n")
         write("root/.gradle/caches/modules/x.bin", "cache\n")

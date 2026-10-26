@@ -13,7 +13,7 @@ Honest limits of the Lab, all from running it in a PocketShell guest:
 
 - `ping` works in the guest (ICMP is allowed); if it cannot run, the tool falls back to timing TCP connects and says so.
 - `traceroute` needs raw sockets, which the guest denies. `tracepath` works without them but is not installed by
-  default (`apk add iputils-tracepath`, or Packages > Add > Network tools); the tool says exactly that.
+  default (`apt install iputils-tracepath`, or Packages > Add > Network tools); the tool says exactly that.
 - Android 10+ hides `/proc/net/arp` from apps, so MAC addresses are usually unavailable.
 - Discovery uses TCP only. A device that drops every unsolicited packet will not be found.
 - The sweep never leaves your own subnet and never exceeds 254 addresses; it can be stopped at any time.

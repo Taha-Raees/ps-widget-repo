@@ -393,7 +393,7 @@ class SyncProfileTest {
         assertNull(
             runRecord(
                 profile(),
-                RunResult(exitCode = null, summary = "rsync is not installed (apk add rsync)"),
+                RunResult(exitCode = null, summary = "rsync is not installed (apt install rsync)"),
                 atMs = 7L,
             ),
         )

@@ -97,12 +97,12 @@ class ReviewFixesTest {
     @Test
     fun `a hostile archive is refused at inspect - nothing is staged and nothing is written`() {
         val dev = device("New Phone")
-        val canary = File(dev.root, "etc/alpine-release").readText()
+        val canary = File(dev.root, "etc/debian_version").readText()
         val cases = mapOf(
             "dotdot" to TarBuilder().dir("root").file("root/../../escape.txt"),
             "absolute" to TarBuilder().dir("root").file("/tmp/escape-absolute.txt"),
-            "through a link" to TarBuilder().dir("root").symlink("root/l", "/etc").file("root/l/alpine-release", "OVERWRITTEN"),
-            "outside folders" to TarBuilder().dir("etc").file("etc/alpine-release", "OVERWRITTEN"),
+            "through a link" to TarBuilder().dir("root").symlink("root/l", "/etc").file("root/l/debian_version", "OVERWRITTEN"),
+            "outside folders" to TarBuilder().dir("etc").file("etc/debian_version", "OVERWRITTEN"),
         )
         for ((label, builder) in cases) {
             val out = inspectArchive(dev, builder.bytes())
@@ -110,7 +110,7 @@ class ReviewFixesTest {
             assertTrue("$label: ${(out as InspectOutcome.Failed).reason}", out.reason.contains("not safe"))
             assertTrue("$label: the stage must be gone", dev.engine().leftoverStages().isEmpty())
         }
-        assertEquals("the device's own files are untouched", canary, File(dev.root, "etc/alpine-release").readText())
+        assertEquals("the device's own files are untouched", canary, File(dev.root, "etc/debian_version").readText())
         assertFalse(File("/tmp/escape-absolute.txt").exists())
     }
 
@@ -194,7 +194,7 @@ class ReviewFixesTest {
         assertTrue(backup(old, storage) is BackupOutcome.Done)
 
         val fresh = FakeDevice("New").also { devices += it }
-        fresh.write("etc/alpine-release", "3.24.2\n")
+        fresh.write("etc/debian_version", "13.7\n")
         fresh.writeDatastore("notes_store", "ORIGINAL notes on this phone")
         val engine = fresh.engine()
         fun restoreOnce() {

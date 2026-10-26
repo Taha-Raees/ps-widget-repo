@@ -24,7 +24,7 @@ import java.io.File
  * whole directory (`*&#47;node_modules`), `-T` lists may name directories and
  * paths with spaces, symlinks (absolute and relative) and modes survive, and
  * a missing include path makes tar fail — so the script FILTERS the include
- * list to paths that exist (e.g. `/opt` on a fresh Alpine).
+ * list to paths that exist (e.g. `/opt` on a fresh guest).
  */
 object BackupJob {
 
@@ -125,13 +125,14 @@ op_backup() {
   rm -rf "§META" && mkdir -p "§META" || finish 3 "cannot prepare the metadata folder"
   cp -a "§S/meta/." "§META/" 2>/dev/null
   if [ -f "§S/want-packages" ]; then
-    if [ -f "§R/etc/apk/world" ]; then cp "§R/etc/apk/world" "§META/apk-world"; fi
-    if [ -f "§R/etc/apk/repositories" ]; then cp "§R/etc/apk/repositories" "§META/apk-repositories"; fi
+    # (the package list, meta/pkg-manual, was staged by the app and copied above)
+    if [ -d "§R/etc/apt/sources.list.d" ]; then cat "§R"/etc/apt/sources.list.d/*.sources > "§META/apt-sources" 2>/dev/null; fi
   fi
-  { uname -m; cat "§R/etc/alpine-release" 2>/dev/null; } > "§META/system.txt"
+  # system.txt: the architecture, then the distribution ("debian 13.7"; an Alpine-era backup holds its release).
+  { uname -m; if [ -f "§R/etc/debian_version" ]; then echo "debian §(cat "§R/etc/debian_version")"; else cat "§R/etc/alpine-release" 2>/dev/null; fi; } > "§META/system.txt"
   cp "§META/system.txt" "§S/system.txt"
 
-  # tar fails on an include path that does not exist (/opt on a fresh Alpine):
+  # tar fails on an include path that does not exist (/opt on a fresh guest):
   # keep the ones that do, and say which were skipped.
   : > "§S/include.eff"
   : > "§S/skipped.txt"
@@ -199,18 +200,21 @@ op_reinstall() {
     if [ -n "§line" ]; then set -- "§@" "§line"; fi
   done < "§S/world.txt"
   if [ "§#" -eq 0 ]; then phase done; finish 0; fi
-  apk add --no-progress -- "§@" > "§S/apk.log" 2>&1
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update > "§S/apt.log" 2>&1
+  apt-get install -y -- "§@" >> "§S/apt.log" 2>&1
   RC="§?"
-  if [ "§RC" != 0 ]; then finish "§RC" "§(tail -n 1 "§S/apk.log")"; fi
+  if [ "§RC" != 0 ]; then finish "§RC" "§(tail -n 1 "§S/apt.log")"; fi
   phase done
   finish 0
 }
 
 op_installzstd() {
   phase installing
-  apk add --no-progress zstd > "§S/apk.log" 2>&1
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get install -y zstd > "§S/apt.log" 2>&1 || { apt-get update >> "§S/apt.log" 2>&1 && apt-get install -y zstd >> "§S/apt.log" 2>&1; }
   RC="§?"
-  if [ "§RC" != 0 ]; then finish "§RC" "§(tail -n 1 "§S/apk.log")"; fi
+  if [ "§RC" != 0 ]; then finish "§RC" "§(tail -n 1 "§S/apt.log")"; fi
   phase done
   finish 0
 }

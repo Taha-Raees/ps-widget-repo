@@ -8,7 +8,7 @@ import app.pocketshell.widget.plugin.WidgetPlugin
 class ServerHubPlugin : WidgetPlugin {
 
     override val pluginId: String = "serverhub"
-    override val pluginVersion: String = "1.0.0"
+    override val pluginVersion: String = "1.0.1"
 
     override fun create(androidContext: Context): HomeApplication = HubApp
 }

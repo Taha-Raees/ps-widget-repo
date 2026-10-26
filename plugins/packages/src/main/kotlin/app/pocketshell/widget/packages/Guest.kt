@@ -73,7 +73,7 @@ class GuestExec(private val appContext: Context, private val rootfs: File, priva
         guestCwd = cwd,
     )
 
-    /** Run to completion (or [timeoutMs]); never throws. [apk] = give the launch the package cache the host's own apk uses. */
+    /** Run to completion (or [timeoutMs]); never throws. [apk] = give the launch the package cache the host's own apt uses. */
     fun run(argv: List<String>, timeoutMs: Long, apk: Boolean = false, cwd: String? = null): ExecResult = try {
         val r = ProcessBuilderGuestCommandRunner().start(spec(argv, apk, cwd)).waitFor(timeoutMs)
         ExecResult(r.exitCode, r.stdout, r.stderr, r.error)

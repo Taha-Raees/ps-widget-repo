@@ -110,7 +110,7 @@ import kotlinx.coroutines.withContext
  *     card records only runs it performed itself;
  *   - backends are probed with `command -v` — an absent rsync/rclone is
  *     the honest "not installed" state with the real install hint (and
- *     an in-card `apk add`), never a silent skip;
+ *     an in-card `apt-get install`), never a silent skip;
  *   - no credential is ever stored or asked for (ssh remotes reference
  *     the user's existing guest ~/.ssh; rclone remotes the user's own
  *     rclone.conf), and no size is ever fabricated (neither dry-run
@@ -367,8 +367,8 @@ object SyncApp : HomeApplication() {
             }
         }
 
-        // M8.4.1 — install a missing backend with the guest's own apk
-        // (one bounded `apk add`), then re-probe so availability flips.
+        // M8.4.1 — install a missing backend with the guest's own apt
+        // (one bounded `apt-get install`), then re-probe so availability flips.
         LaunchedEffect(state.installTick) {
             if (state.installTick == 0) return@LaunchedEffect
             if (!state.installOnce.claim(state.installTick)) return@LaunchedEffect
@@ -1115,7 +1115,7 @@ private fun SyncDetail(
             )
             when (val iu = installUi) {
                 RunUi.Running -> Text(
-                    text = "Installing ${profile.backend.name.lowercase()} (apk add)…",
+                    text = "Installing ${profile.backend.name.lowercase()} (apt-get install)…",
                     fontFamily = TerminalTheme.mono,
                     fontSize = 11.sp,
                     color = HomeTokens.textDim,

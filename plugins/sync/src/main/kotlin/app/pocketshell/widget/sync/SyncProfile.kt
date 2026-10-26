@@ -57,7 +57,7 @@ data class SyncProfile(
     val excludes: List<String> = emptyList(),
 )
 
-/** The v1 backends — both exist in Alpine 3.24 aarch64 (verified). */
+/** The v1 backends — both are Debian 13 arm64 packages (rsync, rclone). */
 @Serializable
 enum class SyncBackend {
     RSYNC,

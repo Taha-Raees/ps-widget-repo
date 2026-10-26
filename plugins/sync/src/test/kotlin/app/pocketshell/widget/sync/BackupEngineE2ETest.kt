@@ -73,7 +73,7 @@ class BackupEngineE2ETest {
         assertEquals(4, side.manifest.packages)
         assertEquals(setOf(BackupScope.HOME, BackupScope.PACKAGES, BackupScope.APP_SETTINGS), side.manifest.scopes.toSet())
         assertNotNull(side.arch)
-        assertEquals("3.24.2", side.alpine)
+        assertEquals("debian 13.7", side.alpine)
         // No staged files remain in the guest tmp.
         assertTrue(File(dev.root, "tmp/psbak").list().orEmpty().isEmpty())
         assertFalse(File(dev.root, "tmp/psbak-meta").exists())
@@ -92,7 +92,7 @@ class BackupEngineE2ETest {
         assertTrue(m.contains("root/proj/src/rel-link"))
         assertTrue(m.contains("root/.gradle/init.d/keep.gradle"))
         assertTrue(m.contains("tmp/psbak-meta/manifest.json"))
-        assertTrue(m.contains("tmp/psbak-meta/apk-world"))
+        assertTrue(m.contains("tmp/psbak-meta/pkg-manual"))
         assertTrue(m.contains("tmp/psbak-meta/system.txt"))
         // Presets: node_modules, gradle caches and ~/.cache are not carried.
         assertTrue(m.none { it.contains("node_modules") })
@@ -140,7 +140,7 @@ class BackupEngineE2ETest {
         val (dir, storage) = store()
         val d = done(backup(dev, storage, BackupOptions(scopes = setOf(BackupScope.HOME))))
         val m = members(dir, d.record.name)
-        assertTrue(m.none { it.contains("apk-world") })
+        assertTrue(m.none { it.contains("pkg-manual") })
         assertTrue(m.none { it.contains("appdata") })
         assertEquals(0, d.record.manifest.packages)
     }
@@ -197,15 +197,14 @@ class BackupEngineE2ETest {
         val (dir, storage) = store()
         val name = done(backup(old, storage, pass = "pw")).record.name
 
-        // A brand-new device: only a bare Alpine, and a picked file (no sidecar available).
+        // A brand-new device: only a bare Debian, and a picked file (no sidecar available).
         val fresh = FakeDevice("New Phone").also { devices += it }
-        fresh.write("etc/alpine-release", "3.24.2\n")
-        fresh.write("etc/apk/world", "alpine-baselayout\n")
+        fresh.write("etc/debian_version", "13.7\n")
         fresh.write("root/.profile", "default profile\n")
         val engine = fresh.engine()
 
         val ready = engine.inspect(PickedFileSource(File(dir, name)), "pw".toCharArray(), none, quiet) as InspectOutcome.Ready
-        assertEquals(listOf("alpine-baselayout", "bash", "git", "openjdk21"), ready.packages)
+        assertEquals(listOf("base-files", "bash", "git", "openjdk-21-jdk-headless"), ready.packages)
         assertEquals(listOf("notes_store"), ready.appSettings)
         assertEquals("Old Phone", ready.manifest.device)
         assertTrue(ready.compatibility.ok)
@@ -283,7 +282,7 @@ class BackupEngineE2ETest {
         done(backup(old, storage))
 
         val fresh = FakeDevice("New").also { devices += it }
-        fresh.write("etc/alpine-release", "3.24.2\n")
+        fresh.write("etc/debian_version", "13.7\n")
         fresh.writeDatastore("notes_store", "notes already on this phone")
         fresh.writeDatastore("plugin_consents", "THIS PHONE'S GRANTS")
         val engine = fresh.engine()
@@ -302,7 +301,7 @@ class BackupEngineE2ETest {
         val (_, storage) = store()
         done(backup(old, storage))
         val fresh = FakeDevice("New").also { devices += it }
-        fresh.write("etc/alpine-release", "3.24.2\n")
+        fresh.write("etc/debian_version", "13.7\n")
         val engine = fresh.engine()
         val ready = engine.inspect(storedSource(storage, storage.firstArchive()), null, none, quiet) as InspectOutcome.Ready
         val applied = engine.apply(ready.stageId, setOf(BackupScope.HOME, BackupScope.APP_SETTINGS), RestoreMode.IN_PLACE, restoreAppSettings = false, none, quiet) as ApplyOutcome.Applied
@@ -483,7 +482,7 @@ class BackupEngineE2ETest {
         assertTrue(engine.leftoverStages().isEmpty())
         // An id that is not the app's own shape can never address a path.
         engine.discardStage("../../etc")
-        assertTrue(File(dev.root, "etc/alpine-release").isFile)
+        assertTrue(File(dev.root, "etc/debian_version").isFile)
     }
 
     // ============================================================ packages
@@ -496,7 +495,7 @@ class BackupEngineE2ETest {
         val engine = dev.engine()
         val ready = engine.inspect(storedSource(storage, storage.firstArchive()), null, none, quiet) as InspectOutcome.Ready
         // Poison the staged list the way a hostile archive might.
-        val worldFile = File(dev.root, "tmp/psbak/${ready.stageId}/inspect/tmp/psbak-meta/apk-world")
+        val worldFile = File(dev.root, "tmp/psbak/${ready.stageId}/inspect/tmp/psbak-meta/pkg-manual")
         worldFile.writeText("bash\n\$(reboot)\n-evil\ngit\n;rm -rf /\n")
 
         val fake = object : GuestJobRunner {

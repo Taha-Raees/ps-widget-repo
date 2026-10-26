@@ -276,7 +276,7 @@ object PingParse {
         return when {
             "operation not permitted" in t || "permission denied" in t || "must be root" in t || "raw socket" in t || "socket: " in t && "denied" in t ->
                 "ping needs raw-socket permission, which this Linux environment does not have"
-            "not found" in t || "no such file" in t -> "ping is not installed (apk add iputils)"
+            "not found" in t || "no such file" in t -> "ping is not installed (apt-get install iputils-ping)"
             else -> null
         }
     }

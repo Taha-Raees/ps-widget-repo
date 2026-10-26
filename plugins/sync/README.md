@@ -29,7 +29,7 @@ loads with `DexClassLoader`. Design + device evidence: `PLAN.md`.
 | in | out |
 |---|---|
 | `~` (the Linux home, `rootfs/root`) — projects, dotfiles, tool settings | the **rootfs** (regenerable, GBs, fragile across devices) |
-| the **package list** (`/etc/apk/world`) — reinstalled on the new phone | plugin permissions, the installed-plugin catalog, home layout, notification state |
+| the **package list** (apt's manual set, read from the dpkg database) — reinstalled on the new phone with apt (a backup from the earlier Alpine guest restores its files; its apk list is not reinstalled) | plugin permissions, the installed-plugin catalog, home layout, notification state |
 | app settings: `notes_store`, `launchers`, `settings`, `sync_profiles` | the raw app data directory |
 | optional: `/usr/local`, `/opt` | |
 
@@ -41,7 +41,7 @@ user explicitly accepts including them — best effort, and the UI says so.
 ## The `.psbak` file
 
 `PSBAK` + version + flags + codec (8 bytes), then a `tar` stream compressed with
-**zstd** (when installed; `apk add zstd`) or **gzip** (always there), optionally
+**zstd** (when installed; `apt install zstd`) or **gzip** (always there), optionally
 **encrypted**: AES-256-GCM in 64 KiB chunks (STREAM construction: per-chunk nonce
 counter, last-chunk flag, header as AAD), key = PBKDF2-HMAC-SHA256 (600k) of the
 passphrase. Platform primitives only — no tool is needed on a fresh phone. A

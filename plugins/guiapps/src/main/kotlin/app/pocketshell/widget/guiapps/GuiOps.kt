@@ -12,7 +12,7 @@ import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 /**
- * Everything that touches the disk, the network or the apk database for this app. The ONLY file with
+ * Everything that touches the disk, the network or the dpkg database for this app. The ONLY file with
  * sockets (GuestExec in Guest.kt is the only one with processes) - a contract test pins both.
  */
 
@@ -21,7 +21,7 @@ data class DesktopApp(val entry: DesktopEntry, val flavour: Flavour)
 
 /** What the guest looks like right now. All of it comes from small local file reads. */
 data class Snapshot(
-    val apk: Map<String, String>,
+    val pkgs: Map<String, String>,
     val images: List<InstalledImage>,
     val desktop: List<DesktopApp>,
     val sessionReady: Boolean,
@@ -70,12 +70,12 @@ class GuiFiles(val rootfs: File) {
         return d.deleteRecursively()
     }
 
-    // ---- the apk database
+    // ---- the dpkg database
 
-    /** name -> version of every installed apk package (the installed db is plain text). */
-    fun readApk(): Map<String, String> = try {
-        val db = File(rootfs, "lib/apk/db/installed")
-        if (db.isFile && db.length() < 40_000_000) ApkDb.installed(db.readText()) else emptyMap()
+    /** name -> version of every installed Debian package (the dpkg status database is plain text). */
+    fun readPkgs(): Map<String, String> = try {
+        val db = File(rootfs, "var/lib/dpkg/status")
+        if (db.isFile && db.length() < 60_000_000) DpkgDb.installed(db.readText()) else emptyMap()
     } catch (_: Exception) {
         emptyMap()
     }
@@ -137,7 +137,7 @@ class GuiFiles(val rootfs: File) {
         }
     }
 
-    fun snapshot(): Snapshot = Snapshot(readApk(), readImages(), scanDesktop(), sessionReady(), glibcReady())
+    fun snapshot(): Snapshot = Snapshot(readPkgs(), readImages(), scanDesktop(), sessionReady(), glibcReady())
 
     /** The last [maxLines] lines of an app's log (bounded read from the end). */
     fun logTail(id: String, maxLines: Int = 25): String = try {
@@ -154,18 +154,27 @@ class GuiFiles(val rootfs: File) {
     }
 }
 
-/** The installed database of apk, read directly: `P:` name, `V:` version, `I:` installed size, `T:` description. */
-object ApkDb {
+/** The dpkg status database, read directly: name -> version of every package whose status is `install ok installed`. */
+object DpkgDb {
 
     fun installed(text: String): Map<String, String> {
         val out = LinkedHashMap<String, String>()
         var name: String? = null
+        var version: String? = null
+        var ok = false
+        fun flush() {
+            if (ok) name?.let { n -> version?.let { out[n] = it } }
+            name = null; version = null; ok = false
+        }
         for (line in text.lineSequence()) {
             when {
-                line.startsWith("P:") -> name = line.substring(2)
-                line.startsWith("V:") -> { name?.let { out[it] = line.substring(2) }; name = null }
+                line.isEmpty() -> flush()
+                line.startsWith("Package: ") -> name = line.substring(9).trim()
+                line.startsWith("Version: ") -> version = line.substring(9).trim()
+                line.startsWith("Status: ") -> ok = line.substring(8).trim() == "install ok installed"
             }
         }
+        flush()
         return out
     }
 }

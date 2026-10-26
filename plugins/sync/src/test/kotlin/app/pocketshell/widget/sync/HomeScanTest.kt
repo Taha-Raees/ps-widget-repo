@@ -247,7 +247,7 @@ class HomeScanTest {
                 // Restore onto a fresh phone.
                 val fresh = FakeDevice("New Phone")
                 try {
-                    fresh.write("etc/alpine-release", "3.24.2\n")
+                    fresh.write("etc/debian_version", "13.7\n")
                     val engine = fresh.engine()
                     val ready = engine.inspect(StoredSource(storage, storage.list().first()), null, CancelToken()) { } as InspectOutcome.Ready
                     assertEquals(listOf(".claude", ".zcode", "Projects/keep"), ready.manifest.homeItems)

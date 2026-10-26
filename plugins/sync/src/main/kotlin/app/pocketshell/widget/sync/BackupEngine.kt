@@ -327,8 +327,12 @@ class BackupEngine(
 
         val wantPackages = BackupScope.PACKAGES in opts.scopes
         if (wantPackages) File(stage, BackupJob.Files.WANT_PACKAGES).writeText("1")
+        // The package list (apt's manual set) is read from the dpkg files host-side and staged with the
+        // other metadata; the job copies meta/ into the backup as-is.
         val packages = if (wantPackages) {
-            ApkWorld.parse(readText(File(env.rootfs, "etc/apk/world"))).size
+            val manual = PkgList.manual(readText(File(env.rootfs, "var/lib/dpkg/status")), readText(File(env.rootfs, "var/lib/apt/extended_states")))
+            if (manual.isNotEmpty()) File(meta, "pkg-manual").writeText(lines(manual))
+            manual.size
         } else {
             0
         }
@@ -462,12 +466,14 @@ class BackupEngine(
             val metaDir = File(stage, "${BackupJob.Files.INSPECT_DIR}/${BackupPlan.META_DIR}")
             val manifest = BackupCodecs.decodeManifest(readText(File(metaDir, "manifest.json")))
                 ?: return InspectOutcome.Failed("this backup has no readable manifest")
-            val packages = ApkWorld.parse(readText(File(metaDir, "apk-world")))
+            // An Alpine-era backup lists apk names, which do not exist in Debian: its files restore, its
+            // package list is not offered (the compatibility warning says so).
+            val packages = PkgList.parse(readText(File(metaDir, "pkg-manual")))
             val appSettings = File(metaDir, "appdata").listFiles().orEmpty()
                 .map { it.name.removeSuffix(".preferences_pb") }
                 .filter { it in AppSettingsFiles.NAMES }
-            val alpine = readText(File(env.rootfs, "etc/alpine-release"))?.trim()
-            val compat = Compatibility.check(source.record, manifest, guestArch(), alpine)
+            val distro = readText(File(env.rootfs, "etc/debian_version"))?.trim()?.let { "debian $it" }
+            val compat = Compatibility.check(source.record, manifest, guestArch(), distro)
             keep = true
             return InspectOutcome.Ready(id, header, manifest, source.record, packages, appSettings, compat)
         } catch (_: CancelledException) {
@@ -542,11 +548,11 @@ class BackupEngine(
 
     // ------------------------------------------------------ packages & tools
 
-    /** `apk add` the backup's package list (needs network). */
+    /** `apt-get install` the backup's package list (needs network). */
     fun reinstallPackages(stageId: String, cancel: CancelToken, onProgress: (Progress) -> Unit): StepOutcome {
         val stage = stageDir(stageId)
         return try {
-            val world = ApkWorld.parse(readText(File(stage, "${BackupJob.Files.INSPECT_DIR}/${BackupPlan.META_DIR}/apk-world")))
+            val world = PkgList.parse(readText(File(stage, "${BackupJob.Files.INSPECT_DIR}/${BackupPlan.META_DIR}/pkg-manual")))
             if (world.isEmpty()) return StepOutcome.Done("the backup lists no packages")
             File(stage, BackupJob.Files.SCRIPT).writeText(BackupJob.SCRIPT)
             File(stage, BackupJob.Files.WORLD).writeText(lines(world))
@@ -559,7 +565,7 @@ class BackupEngine(
         }
     }
 
-    /** Install zstd (one small Alpine package) — a faster, smaller codec than the gzip fallback. */
+    /** Install zstd (one small Debian package) — a faster, smaller codec than the gzip fallback. */
     fun installZstd(cancel: CancelToken, onProgress: (Progress) -> Unit): StepOutcome {
         val id = env.newId()
         val stage = stageDir(id)

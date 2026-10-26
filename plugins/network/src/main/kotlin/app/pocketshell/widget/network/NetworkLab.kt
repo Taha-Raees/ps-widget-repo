@@ -199,7 +199,7 @@ private fun ToolResultView(result: ToolResult) {
         is ToolResult.TraceResult -> {
             MonoText("traceroute ${result.host}", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
             val hops = result.hops
-            if (hops == null) MonoText("Traceroute needs raw sockets, which this Linux does not allow. tracepath works without them: install it from Packages (Add > Network tools) or run  apk add iputils-tracepath  and try again.", color = HomeTokens.danger, maxLines = 6)
+            if (hops == null) MonoText("Traceroute needs raw sockets, which this Linux does not allow. tracepath works without them: install it from Packages (Add > Network tools) or run  apt-get install iputils-tracepath  and try again.", color = HomeTokens.danger, maxLines = 6)
             else {
                 hops.forEach { h -> MonoText("%2d  %s  %s".format(h.n, h.addr ?: "*", h.ms?.let { "%.1f ms".format(it) } ?: ""), maxLines = 1) }
                 MonoText("via ${result.tool}", color = HomeTokens.textDim, fontSize = 10.sp)

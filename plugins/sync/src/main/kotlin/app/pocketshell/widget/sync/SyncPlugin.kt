@@ -15,7 +15,7 @@ import app.pocketshell.widget.plugin.WidgetPlugin
 class SyncPlugin : WidgetPlugin {
 
     override val pluginId: String = "sync"
-    override val pluginVersion: String = "3.2.0"
+    override val pluginVersion: String = "4.0.0"
 
     override fun create(androidContext: Context): HomeApplication = SyncApp
 }

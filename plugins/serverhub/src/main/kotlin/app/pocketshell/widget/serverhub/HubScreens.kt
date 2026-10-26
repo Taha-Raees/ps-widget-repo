@@ -285,7 +285,7 @@ private fun ServiceFormDialog(req: FormRequest, state: HubState, onDismiss: () -
                 MonoText("SHOW THE WI-FI LINK", color = HomeTokens.textDim, fontSize = 9.sp, modifier = Modifier.padding(top = 8.dp))
                 Choices(listOf("No" to false, "Yes" to true), wifi) { wifi = it }
                 if (wifi) MonoText("Other devices can only connect if the command listens on 0.0.0.0. Nothing here adds a password.", color = HomeTokens.textDim, maxLines = 3)
-                if (missing.isNotEmpty()) MonoText("Not installed: ${missing.joinToString(", ")}${t?.packages?.takeIf { it.isNotEmpty() }?.let { " - install: apk add ${it.joinToString(" ")}" }.orEmpty()}", color = HomeTokens.accent, maxLines = 4, modifier = Modifier.padding(top = 8.dp))
+                if (missing.isNotEmpty()) MonoText("Not installed: ${missing.joinToString(", ")}${t?.packages?.takeIf { it.isNotEmpty() }?.let { " - install: apt-get install ${it.joinToString(" ")}" }.orEmpty()}", color = HomeTokens.accent, maxLines = 4, modifier = Modifier.padding(top = 8.dp))
                 ErrorLine(error)
             }
         },

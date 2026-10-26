@@ -18,7 +18,7 @@ health, restart controls and access links**. A Home application (`HubApp`) loade
   and whether other devices on the Wi-Fi can reach it.
 - **NEW** - quick starts: static website (Python or Caddy or Node), a tiny **local JSON API** (stdlib Python, file
   generated for you), Redis, code-server (from GUI Apps), or your own command. The folder and starter files are
-  created; the program is checked first and the missing Alpine package is named.
+  created; the program is checked first and the missing Debian package is named.
 
 ## Rules
 

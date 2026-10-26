@@ -408,10 +408,12 @@ class SyncProbeTest {
     // -------------------------------------------------- install (M8.4.1)
 
     @Test
-    fun `install backend - apk add exact argv and honest success`() {
+    fun `install backend - apt-get install exact argv and honest success`() {
         val recorder = RecordingExec(exec(stdout = "OK: 42 packages upgraded, 3 newly installed\n"))
         val result = probe(recorder).installBackend(SyncBackend.RSYNC)
-        assertEquals(listOf("/sbin/apk", "add", "rsync"), recorder.argvs.single())
+        // the package name is a positional argument, never part of the script text
+        assertEquals(listOf("/bin/sh", "-c", SyncProbe.INSTALL_SCRIPT, "sh", "rsync"), recorder.argvs.single())
+        assertTrue(SyncProbe.INSTALL_SCRIPT.contains("apt-get install -y \"\$1\""))
         assertEquals(SyncProbe.INSTALL_TIMEOUT_MS, recorder.timeouts.single())
         assertEquals(0, result.exitCode)
         assertTrue(result.summary.contains("installed"))
@@ -419,12 +421,12 @@ class SyncProbeTest {
     }
 
     @Test
-    fun `a failed install reports apk's real stderr`() {
-        val recorder = RecordingExec(exec(ok = false, stderr = "ERROR: unable to select packages\n"))
+    fun `a failed install reports apt's real stderr`() {
+        val recorder = RecordingExec(exec(ok = false, stderr = "E: Unable to locate package rclone\n"))
         val result = probe(recorder).installBackend(SyncBackend.RCLONE)
-        assertEquals(listOf("/sbin/apk", "add", "rclone"), recorder.argvs.single())
+        assertEquals(listOf("/bin/sh", "-c", SyncProbe.INSTALL_SCRIPT, "sh", "rclone"), recorder.argvs.single())
         assertEquals(1, result.exitCode)
         assertTrue(result.summary.contains("rclone install failed"))
-        assertTrue(result.summary.contains("ERROR: unable to select packages"))
+        assertTrue(result.summary.contains("E: Unable to locate package rclone"))
     }
 }

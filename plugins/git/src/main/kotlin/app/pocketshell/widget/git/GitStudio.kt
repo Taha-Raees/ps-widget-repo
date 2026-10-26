@@ -203,7 +203,7 @@ private fun StudioEmpty(ui: GitUi, onOpenLinuxShell: () -> Unit, onOpenDiagnosti
         }
         ready != null && !ready.snapshot.hasGit -> {
             StateLine("Git is not installed")
-            MonoText("Install it from the Linux Shell (apk add git).", color = HomeTokens.textDim)
+            MonoText("Install it from the Linux Shell (apt install git).", color = HomeTokens.textDim)
             TextButton(onClick = onOpenLinuxShell) { Text("Open Linux", color = HomeTokens.accent) }
         }
         else -> {

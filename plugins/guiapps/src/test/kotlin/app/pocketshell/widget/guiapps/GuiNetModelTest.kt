@@ -48,36 +48,40 @@ class GuiNetModelTest {
         assertNull(Releases.pickAsset("""{"assets":[]}""", "x"))
     }
 
-    @Test fun apkInstalledDatabaseIsParsed() {
-        val db = "C:Q1abc=\nP:xterm\nV:410-r0\nA:aarch64\nS:1\n\nC:Q1def=\nP:py3-foo-bar\nV:1.2.3-r2\n\n"
-        assertEquals(mapOf("xterm" to "410-r0", "py3-foo-bar" to "1.2.3-r2"), ApkDb.installed(db))
-        assertTrue(ApkDb.installed("").isEmpty())
-    }
-
-    @Test fun apkNamesSplitFromTheRight() {
-        assertEquals("py3-foo" to "1.2.3-r0", ApkNames.split("py3-foo-1.2.3-r0"))
-        assertEquals("gtk+3.0" to "3.24.43-r2", ApkNames.split("gtk+3.0-3.24.43-r2"))
-        assertNull(ApkNames.split("noversion"))
+    @Test fun dpkgStatusDatabaseIsParsed() {
+        val db = "Package: xterm\nStatus: install ok installed\nPriority: optional\nVersion: 398-1\nDescription: X terminal\n continued\n\n" +
+            "Package: vim\nStatus: deinstall ok config-files\nVersion: 2:9.1.1230-2\n\nPackage: python3-foo\nStatus: install ok installed\nVersion: 1.2.3-2\n"
+        assertEquals(mapOf("xterm" to "398-1", "python3-foo" to "1.2.3-2"), DpkgDb.installed(db))
+        assertTrue(DpkgDb.installed("").isEmpty())
     }
 
     @Test fun upgradableListIsParsed() {
-        val out = "alpine-release-3.24.3-r0 aarch64 {alpine-base} (MIT) [upgradable from: alpine-release-3.24.2-r0]\nxterm-410-r0 aarch64 {xterm} (X11) [installed]\n"
-        assertEquals(mapOf("alpine-release" to "3.24.3-r0"), ApkOutput.upgradable(out))
+        val out = "Listing...\ntzdata/stable-updates 2026e-0+deb13u1 all [upgradable from: 2026c-0+deb13u1]\nxterm/stable,now 398-1 arm64 [installed]\n"
+        assertEquals(mapOf("tzdata" to "2026e-0+deb13u1"), AptOutput.upgradable(out))
     }
 
-    @Test fun apkFailuresAreExplained() {
-        assertTrue(ApkOutput.needsUpdate("ERROR: unable to select packages:\n  foo (no such package):"))
-        assertFalse(ApkOutput.needsUpdate("OK: 100 MiB in 400 packages"))
-        assertEquals("Another package operation is running. Wait for it, then try again.", ApkOutput.reason("", "ERROR: Unable to lock database: Resource busy\nerror opening database", null))
-        assertEquals("ERROR: boom", ApkOutput.reason("", "fine\nERROR: boom", null))
-        assertEquals("exec failed", ApkOutput.reason("", "", "exec failed"))
+    @Test fun aptFailuresAreExplained() {
+        assertTrue(AptOutput.needsUpdate("E: Unable to locate package foo"))
+        assertFalse(AptOutput.needsUpdate("0 upgraded, 1 newly installed"))
+        assertEquals("Another package operation is running. Wait for it, then try again.", AptOutput.reason("", "E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process 42", null))
+        assertEquals("boom", AptOutput.reason("", "fine\nE: boom", null))
+        assertEquals("exec failed", AptOutput.reason("", "", "exec failed"))
+    }
+
+    @Test fun aptCommandsAreBuiltFromValidatedNames() {
+        val get = listOf("env", "DEBIAN_FRONTEND=noninteractive", "/usr/bin/apt-get", "-q", "-y")
+        assertEquals(get + listOf("install", "zathura", "zathura-pdf-poppler"), AptCmd.install(listOf("zathura", "zathura-pdf-poppler")))
+        assertEquals(get + listOf("remove", "--autoremove", "xterm"), AptCmd.remove("xterm"))
+        assertEquals(get + listOf("install", "--only-upgrade", "xterm"), AptCmd.upgrade("xterm"))
+        assertTrue(runCatching { AptCmd.install(listOf("-o", "x")) }.isFailure)
+        assertTrue(runCatching { AptCmd.install(emptyList()) }.isFailure)
     }
 
     @Test fun launchFailuresAreExplained() {
         assertTrue(LaunchDiagnosis.diagnose("Error: cannot open display: :0", 1, false)!!.contains("desktop session"))
         assertTrue(LaunchDiagnosis.diagnose("Failed to connect to Wayland display", 1, true)!!.contains("desktop session"))
-        assertTrue(LaunchDiagnosis.diagnose("./x: error while loading shared libraries: libfoo.so.1: cannot open", 127, true)!!.contains("pocketshell-doctor"))
-        assertTrue(LaunchDiagnosis.diagnose("./x: error while loading shared libraries: libfoo.so.1: cannot open", 127, false)!!.contains("Alpine"))
+        val missing = LaunchDiagnosis.diagnose("./x: error while loading shared libraries: libfoo.so.1: cannot open", 127, true)!!
+        assertTrue(missing.contains("Debian package") && missing.contains("apt-file search libfoo.so.1"))
         assertTrue(LaunchDiagnosis.diagnose("fusermount: failed to open /dev/fuse", 1, true)!!.contains("FUSE"))
         assertTrue(LaunchDiagnosis.diagnose("", 139, true)!!.contains("crashed"))
         assertNull(LaunchDiagnosis.diagnose("all fine", 0, true))
@@ -88,6 +92,6 @@ class GuiNetModelTest {
         assertEquals(listOf(a), CustomApps.decode(CustomApps.encode(listOf(a))))
         assertTrue(CustomApps.decode("custom-x|My Tool|http://insecure/a.AppImage\nbad\nnotcustom|n|https://e.com/a.AppImage").isEmpty())
         assertNotNull(a.directUrl)
-        assertEquals(Runtime.GLIBC, a.runtime)
+        assertEquals(Runtime.APPIMAGE, a.runtime)
     }
 }

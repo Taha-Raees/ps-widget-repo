@@ -108,10 +108,10 @@ class ContractTest {
     }
 
     @Test
-    fun `apk argv is built in one place from validated names`() {
+    fun `apt argv is built in one place from validated names`() {
         for ((name, text) in all) {
             if (name == "PkgModel.kt") continue
-            assertFalse("$name must not hard-code the apk path", text.contains("/sbin/apk"))
+            assertFalse("$name must not hard-code the apt path", text.contains("/usr/bin/apt"))
         }
         val model = src("PkgModel.kt")
         assertTrue(model.contains("require(list.all { PkgNames.valid(it) })"))
@@ -121,7 +121,7 @@ class ContractTest {
     fun `clearing the cache deletes package files only`() {
         val ops = src("PkgOps.kt")
         val clear = ops.substringAfter("fun clearCache").substringBefore("fun facts")
-        assertTrue(clear.contains(".endsWith(\".apk\")"))
+        assertTrue(clear.contains(".endsWith(\".deb\")"))
         assertFalse(clear.contains("deleteRecursively"))
     }
 }

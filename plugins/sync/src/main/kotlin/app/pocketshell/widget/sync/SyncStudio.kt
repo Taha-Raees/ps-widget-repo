@@ -598,7 +598,7 @@ private fun RestoreDone(vault: VaultState, r: RestoreUi.Done) {
     }
     if (r.packages > 0) {
         VSection("PACKAGES")
-        VText("${r.packages} packages were installed on the old phone. Reinstall them here (downloads from the Alpine mirrors).", color = HomeTokens.textDim, size = 11, lines = 3)
+        VText("${r.packages} packages were installed on the old phone. Reinstall them here (downloads from the Debian mirrors).", color = HomeTokens.textDim, size = 11, lines = 3)
         VaultJobLine(vault.reinstall)
         if (vault.reinstall !is VaultRun.Working) {
             VAction("REINSTALL ${r.packages} PACKAGES", enabled = !vault.busy && vault.reinstall !is VaultRun.Finished) { vault.reinstallPackages(r.stageId) }

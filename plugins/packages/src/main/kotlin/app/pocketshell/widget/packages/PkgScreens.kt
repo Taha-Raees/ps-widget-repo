@@ -254,7 +254,7 @@ private fun SystemTab(state: PkgState) {
     FactRow("Architecture", f.arch)
     if (f.kernel.isNotBlank()) FactRow("Kernel", f.kernel)
     f.appVersion?.let { FactRow("PocketShell layer", it) }
-    FactRow("glibc layer", f.glibc ?: "not installed")
+    FactRow("C library", f.glibc?.let { "glibc $it" } ?: "unknown")
     f.devtools?.let { FactRow("Dev tools layer", it) }
 
     SectionLabel("PACKAGES")
@@ -278,8 +278,8 @@ private fun SystemTab(state: PkgState) {
         ActionText("Repair", enabled = state.busy == null) { state.repair() }
         ActionText("Clear cache", enabled = state.busy == null && (inv?.cacheBytes ?: 0) > 0) { state.clearCache() }
     }
-    MonoText("Clear cache deletes downloaded package files (${Fmt.bytes(inv?.cacheBytes ?: 0)}). Installed software is not touched; apk downloads again when it needs a file.", color = HomeTokens.textDim, maxLines = 4)
-    MonoText("Repair runs apk fix: it re-installs files of packages that are damaged or half-installed.", color = HomeTokens.textDim, maxLines = 3, modifier = Modifier.padding(top = 4.dp))
+    MonoText("Clear cache deletes downloaded package files (${Fmt.bytes(inv?.cacheBytes ?: 0)}). Installed software is not touched; apt downloads again when it needs a file.", color = HomeTokens.textDim, maxLines = 4)
+    MonoText("Repair finishes interrupted installs (dpkg --configure -a) and fixes broken dependencies (apt-get install -f).", color = HomeTokens.textDim, maxLines = 3, modifier = Modifier.padding(top = 4.dp))
 }
 
 @Composable

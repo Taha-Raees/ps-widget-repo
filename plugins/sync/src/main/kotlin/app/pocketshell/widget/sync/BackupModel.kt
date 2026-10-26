@@ -256,7 +256,11 @@ data class BackupRecord(
     /** sha256 of the stored file (hex). */
     val sha256: String,
     val manifest: BackupManifest,
-    /** From the guest at backup time (`uname -m`, /etc/alpine-release); null when unreadable. */
+    /**
+     * From the guest at backup time (`uname -m`, then the distribution: "debian 13.7"; backups made on the
+     * Alpine guest hold the bare Alpine release, e.g. "3.24.1"); null when unreadable. The JSON name stays
+     * `alpine` so older sidecars keep decoding.
+     */
     val arch: String? = null,
     val alpine: String? = null,
 )
@@ -402,7 +406,7 @@ data class Compatibility(val errors: List<String>, val warnings: List<String>) {
     val ok: Boolean get() = errors.isEmpty()
 
     companion object {
-        fun check(record: BackupRecord?, manifest: BackupManifest, localArch: String?, localAlpine: String?): Compatibility {
+        fun check(record: BackupRecord?, manifest: BackupManifest, localArch: String?, localSystem: String?): Compatibility {
             val errors = ArrayList<String>()
             val warnings = ArrayList<String>()
             if (manifest.format > PsbakHeader.VERSION) {
@@ -412,9 +416,18 @@ data class Compatibility(val errors: List<String>, val warnings: List<String>) {
             if (arch != null && localArch != null && arch != localArch) {
                 errors += "this backup is for $arch; this device is $localArch"
             }
-            val alpine = record?.alpine
-            if (alpine != null && localAlpine != null && alpine.substringBeforeLast('.') != localAlpine.substringBeforeLast('.')) {
-                warnings += "this backup was made on Alpine $alpine; this device runs $localAlpine — package versions may differ"
+            val system = record?.alpine
+            if (system != null && localSystem != null) {
+                val fromDebian = system.startsWith("debian ")
+                val toDebian = localSystem.startsWith("debian ")
+                when {
+                    !fromDebian && toDebian ->
+                        warnings += "this backup was made on the earlier Alpine Linux ($system); this device runs Debian — " +
+                            "your files restore, but its package list uses Alpine names and is not reinstalled"
+                    fromDebian && toDebian && system.substringBefore('.') != localSystem.substringBefore('.') ->
+                        warnings += "this backup was made on ${system.replaceFirst("debian", "Debian")}; this device runs " +
+                            "${localSystem.replaceFirst("debian", "Debian")} — package versions may differ"
+                }
             }
             return Compatibility(errors, warnings)
         }
@@ -423,10 +436,10 @@ data class Compatibility(val errors: List<String>, val warnings: List<String>) {
 
 // ------------------------------------------------------------------ packages
 
-/** `/etc/apk/world`: one explicitly installed package (optionally constrained) per line. */
-object ApkWorld {
+/** The backup's package list: Debian package names, one per line (`apt-mark showmanual`). */
+object PkgList {
 
-    private val ENTRY = Regex("""^[A-Za-z0-9][A-Za-z0-9._+@~<>=!-]*$""")
+    private val ENTRY = Regex("""^[a-z0-9][a-z0-9.+-]*(:[a-z0-9]+)?$""")
 
     /** Valid entries in file order, deduplicated; comments, blanks and odd lines dropped. */
     fun parse(text: String?): List<String> = text.orEmpty().lineSequence()
@@ -434,6 +447,25 @@ object ApkWorld {
         .filter { it.isNotEmpty() && !it.startsWith("#") && ENTRY.matches(it) }
         .distinct()
         .toList()
+
+    /**
+     * apt's manual set, read from disk without running apt: installed packages (dpkg [status]) minus those
+     * apt marked `Auto-Installed: 1` in [extendedStates]. What `apt-mark showmanual` prints.
+     */
+    fun manual(status: String?, extendedStates: String?): List<String> {
+        val auto = HashSet<String>()
+        for (stanza in extendedStates.orEmpty().split(Regex("\\n\\s*\\n"))) {
+            val name = stanza.lineSequence().firstOrNull { it.startsWith("Package:") }?.substringAfter(':')?.trim()
+            if (name != null && stanza.lineSequence().any { it.trim() == "Auto-Installed: 1" }) auto += name
+        }
+        val out = ArrayList<String>()
+        for (stanza in status.orEmpty().split(Regex("\\n\\s*\\n"))) {
+            val lines = stanza.lines()
+            val name = lines.firstOrNull { it.startsWith("Package:") }?.substringAfter(':')?.trim() ?: continue
+            if (lines.any { it.trim() == "Status: install ok installed" } && name !in auto) out += name
+        }
+        return out.distinct().sorted()
+    }
 }
 
 /**

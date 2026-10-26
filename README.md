@@ -64,12 +64,12 @@ contract test (`ContractTest.kt`): only the guest layer starts processes, only
 the ops file opens sockets, nothing polls, state runs on its own scope.
 
 - **GUI Apps** - a curated arm64 library of desktop apps in two flavours:
-  musl (Alpine packages, `apk add`) and glibc (the projects' own AppImages,
+  Debian packages (`apt-get install`) and AppImages (the projects' own builds,
   SHA-256 checked against the release). Launches into the host's desktop
   session (`WAYLAND_DISPLAY=psgui`).
 - **Server Hub** - start and manage web servers, local APIs and self-hosted
   services: ports, logs, health, restart controls, access links.
-- **Packages** - add / update / remove apk packages and CLI tool bundles,
+- **Packages** - add / update / remove Debian packages and CLI tool bundles,
   every change simulated and confirmed first; repositories, cache, repair.
 - **Network & Home Lab** (the old Network plugin, 2.0.0) - device discovery,
   DNS / ping / traceroute / port tools, server health, plus SSH hosts, keys,

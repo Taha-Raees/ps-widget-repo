@@ -17,7 +17,7 @@ class BackupOnlyTest {
         assertEquals("sync", SyncApp.SYNC_ID)
         assertEquals("sync", SyncPlugin().pluginId)
         assertEquals("Backup & Restore", SyncApp.spec.name)
-        assertEquals("3.2.0", SyncPlugin().pluginVersion)
+        assertEquals("4.0.0", SyncPlugin().pluginVersion)
     }
 
     @Test

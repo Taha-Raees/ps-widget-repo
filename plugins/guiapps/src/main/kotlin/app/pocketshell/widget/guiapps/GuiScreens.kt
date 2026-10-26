@@ -90,12 +90,12 @@ internal fun GuiStudio(state: GuiState, sideRail: Boolean, nav: WidgetNav) {
 private fun DiscoverTab(state: GuiState, onConfirm: (Confirm) -> Unit) {
     Field("Search the library", state.query, { state.query = it }, hint = "browser, editor, GIMP…")
     Row(Modifier.padding(top = 6.dp)) {
-        Choices(listOf("All" to null, "musl" to Runtime.MUSL, "glibc" to Runtime.GLIBC), state.runtimeFilter) { state.runtimeFilter = it }
+        Choices(listOf("All" to null, "Debian" to Runtime.DEB, "AppImage" to Runtime.APPIMAGE), state.runtimeFilter) { state.runtimeFilter = it }
     }
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp)) {
         Choices(listOf<Pair<String, GuiCategory?>>("Any" to null) + GuiCategory.entries.map { it.label to it }, state.categoryFilter) { state.categoryFilter = it }
     }
-    MonoText("musl = Alpine packages (small, native). glibc = prebuilt arm64 AppImages from the projects' own releases.", color = HomeTokens.textDim, maxLines = 3, modifier = Modifier.padding(top = 6.dp))
+    MonoText("Debian = packages from the signed Debian archive. AppImage = prebuilt arm64 builds from the projects' own releases.", color = HomeTokens.textDim, maxLines = 3, modifier = Modifier.padding(top = 6.dp))
     val apps = state.catalog.filter { a ->
         (state.runtimeFilter == null || a.runtime == state.runtimeFilter) &&
             (state.categoryFilter == null || a.category == state.categoryFilter) &&
@@ -151,8 +151,8 @@ private fun SetupTab(state: GuiState) {
     val s = state.snapshot
     SectionLabel("THIS DEVICE")
     StatusLine(s?.sessionReady == true, "Desktop session", if (s?.sessionReady == true) "running (psgui)" else "not found - start the PocketShell desktop, then launch an app")
-    StatusLine(s?.glibcReady == true, "glibc layer", if (s?.glibcReady == true) "installed - AppImages can run" else "missing - glibc apps cannot run")
-    StatusLine(true, "Package manager", "apk (Alpine, musl)")
+    StatusLine(s?.glibcReady == true, "C library", if (s?.glibcReady == true) "glibc (Debian) - AppImages run natively" else "loader missing - repair Linux in Diagnostics")
+    StatusLine(true, "Package manager", "apt (Debian 13)")
     MonoText("Apps connect to the desktop session through WAYLAND_DISPLAY=psgui and DISPLAY=:0, set for you on every launch.", color = HomeTokens.textDim, maxLines = 3, modifier = Modifier.padding(top = 6.dp))
 
     SectionLabel("ADD AN APPIMAGE")
@@ -166,7 +166,7 @@ private fun SetupTab(state: GuiState) {
     MonoText("Only https. There is no published checksum for a link you paste, so only add files you trust.", color = HomeTokens.textDim, maxLines = 3)
 
     SectionLabel("TIPS")
-    MonoText("A program that will not start: run  pocketshell-doctor <program>  in the terminal to see which glibc libraries it still needs.", color = HomeTokens.textDim, maxLines = 4)
+    MonoText("A program that will not start: run it in the terminal to see its error; a missing library comes from a Debian package (apt-file search <library> finds which).", color = HomeTokens.textDim, maxLines = 4)
     MonoText("Chromium and Electron apps are started with --no-sandbox --disable-gpu --disable-dev-shm-usage, as the guest requires.", color = HomeTokens.textDim, maxLines = 3, modifier = Modifier.padding(top = 4.dp))
 }
 
@@ -227,18 +227,18 @@ private fun AppRow(state: GuiState, app: CatalogApp, onConfirm: (Confirm) -> Uni
     Row(Modifier.fillMaxWidth().padding(start = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         if (!installed) {
             ActionText(if (busy) "Working…" else "Install", enabled = !busy) { state.install(app) }
-            if (busy && app.runtime == Runtime.GLIBC) ActionText("Cancel", danger = true) { state.cancelInstall(app.id) }
+            if (busy && app.runtime == Runtime.APPIMAGE) ActionText("Cancel", danger = true) { state.cancelInstall(app.id) }
         } else {
             if (state.isRunning(app.id)) ActionText("Stop") { state.stop(app.id) } else ActionText("Launch", enabled = !busy) { state.launch(app) }
             if (update != null) ActionText("Update", enabled = !busy) { state.update(app) }
             ActionText("Log", enabled = info != null) { state.banner = Banner(state.logOf(app.id).ifBlank { "The log is empty." }.takeLast(900), false) }
             ActionText("Remove", danger = true, enabled = !busy) {
-                onConfirm(Confirm("Remove ${app.name}?", if (app.runtime == Runtime.MUSL) "The Alpine package ${app.apk} is removed. Its settings in your home folder stay." else "The downloaded file is deleted. Its settings in your home folder stay.", "Remove") { state.uninstall(app) })
+                onConfirm(Confirm("Remove ${app.name}?", if (app.runtime == Runtime.DEB) "The Debian package ${app.pkg} is removed. Its settings in your home folder stay." else "The downloaded file is deleted. Its settings in your home folder stay.", "Remove") { state.uninstall(app) })
             }
         }
         if (op is OpState.Failed) ActionText("Dismiss") { state.dismissOp(app.id) }
     }
-    val source = if (app.runtime == Runtime.MUSL) "apk add ${listOf(app.apk!!) + app.extraApk}".replace("[", "").replace("]", "").replace(",", "")
+    val source = if (app.runtime == Runtime.DEB) "apt-get install ${listOf(app.pkg!!) + app.extraPkgs}".replace("[", "").replace("]", "").replace(",", "")
     else app.directUrl ?: "github.com/${app.repo} (latest release${if (app.delivery == Delivery.TARBALL_WEB) ", opens in the browser" else ""})"
     MonoText(source, color = HomeTokens.textDim, fontSize = 10.sp, maxLines = 2, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
 }

@@ -8,7 +8,7 @@ import app.pocketshell.widget.plugin.WidgetPlugin
 class GuiAppsPlugin : WidgetPlugin {
 
     override val pluginId: String = "guiapps"
-    override val pluginVersion: String = "1.0.0"
+    override val pluginVersion: String = "2.0.0"
 
     override fun create(androidContext: Context): HomeApplication = GuiApp
 }

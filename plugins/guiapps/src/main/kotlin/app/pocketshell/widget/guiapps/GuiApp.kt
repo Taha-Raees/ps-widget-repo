@@ -21,7 +21,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * GUI Apps - discover, install and launch desktop apps for the Linux guest, musl (Alpine packages) and glibc (AppImages).
+ * GUI Apps - discover, install and launch desktop apps for the Linux guest: Debian packages and AppImages.
  *
  * Cost policy: the card is a pure view of a few small local file reads, taken once after it has stayed on screen;
  * nothing polls; the network is touched only by an explicit install, update check or custom download.
@@ -39,7 +39,7 @@ object GuiApp : HomeApplication() {
     override val spec = HomeAppSpec(
         id = GUI_PLUGIN_ID,
         name = "GUI Apps",
-        summary = "Discover, install and launch desktop apps for the Linux guest - musl and glibc, arm64",
+        summary = "Discover, install and launch desktop apps for the Linux guest - Debian packages and AppImages, arm64",
     )
 
     @Composable

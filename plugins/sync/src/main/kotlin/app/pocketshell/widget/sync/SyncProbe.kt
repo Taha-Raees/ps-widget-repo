@@ -173,7 +173,7 @@ internal class SyncProbe(
             SyncBackend.RSYNC -> {
                 val path = rsyncPath
                     ?: return DryRunResult.Failed(
-                        "rsync is not installed in the guest — install it from the Linux Shell (apk add rsync)",
+                        "rsync is not installed in the guest — install it from the Linux Shell (apt install rsync)",
                     )
                 val out = exec.exec(
                     listOf(path, "-n", "--itemize-changes", "--", profile.source, profile.destination),
@@ -185,7 +185,7 @@ internal class SyncProbe(
                 val path = rclonePath
                     ?: return DryRunResult.Failed(
                         "rclone is not installed in the guest — install it from the Linux Shell " +
-                            "(apk add rclone; it lives in the community repository)",
+                            "(apt install rclone)",
                     )
                 val out = exec.exec(
                     listOf(path, "sync", profile.source, profile.destination, "--dry-run", "--combined", "-"),
@@ -260,8 +260,8 @@ internal class SyncProbe(
         } ?: return RunResult(
             exitCode = null,
             summary = when (profile.backend) {
-                SyncBackend.RSYNC -> "rsync is not installed (apk add rsync)"
-                SyncBackend.RCLONE -> "rclone is not installed (apk add rclone)"
+                SyncBackend.RSYNC -> "rsync is not installed (apt install rsync)"
+                SyncBackend.RCLONE -> "rclone is not installed (apt install rclone)"
             },
         )
         val argv = when (profile.backend) {
@@ -289,16 +289,18 @@ internal class SyncProbe(
     }
 
     /**
-     * M8.4.1 — install a missing backend with the guest's own apk (one
-     * bounded exec; needs the guest's network — the real apk output is
-     * the honest result, whatever it is).
+     * M8.4.1 — install a missing backend with the guest's own apt (one
+     * bounded exec; fetches the package index first when apt cannot find
+     * the package; needs the guest's network — the real apt output is the
+     * honest result, whatever it is). The package name travels as a
+     * positional argument, never as script text.
      */
     fun installBackend(backend: SyncBackend, timeoutMs: Long = INSTALL_TIMEOUT_MS): RunResult {
         val pkg = when (backend) {
             SyncBackend.RSYNC -> "rsync"
             SyncBackend.RCLONE -> "rclone"
         }
-        val out = exec.exec(listOf("/sbin/apk", "add", pkg), timeoutMs)
+        val out = exec.exec(listOf("/bin/sh", "-c", INSTALL_SCRIPT, "sh", pkg), timeoutMs)
         val lastLine = (out.stdout.lineSequence() + out.stderr.lineSequence())
             .lastOrNull { it.isNotBlank() } ?: ""
         val detail = when {
@@ -310,6 +312,10 @@ internal class SyncProbe(
     }
 
     companion object {
+
+        /** `apt-get install`, retried once after `apt-get update` (a fresh guest has no package index yet). */
+        const val INSTALL_SCRIPT = "export DEBIAN_FRONTEND=noninteractive; " +
+            "apt-get install -y \"\$1\" || { apt-get update && apt-get install -y \"\$1\"; }"
 
         /** Bounded: a full guest round-trip (proot + version calls + N stats). */
         const val PROBE_TIMEOUT_MS = 15_000L
@@ -330,7 +336,7 @@ internal class SyncProbe(
         /** A real run walks/copies the real tree — the most generous bound. */
         const val RUN_TIMEOUT_MS = 600_000L
 
-        /** apk add of one backend binary: bounded, network-bound. */
+        /** apt-get install of one backend binary: bounded, network-bound. */
         const val INSTALL_TIMEOUT_MS = 180_000L
 
         /** One mkdir -p: instant, but bounded like every exec. */
@@ -340,7 +346,7 @@ internal class SyncProbe(
         private const val D = "$"
 
         /**
-         * THE one batched script for a whole refresh (busybox ash, Alpine).
+         * THE one batched script for a whole refresh (POSIX sh).
          * Profile specs arrive as positional parameters ($1, $2, …) — see
          * the injection note above; the script quotes them (harmless: they
          * are execve data, never reparsed) and never builds commands from

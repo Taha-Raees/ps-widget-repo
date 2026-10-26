@@ -4,22 +4,22 @@ package app.pocketshell.widget.guiapps
  * The pure half of the GUI App Library: the catalog, `.desktop` files, ELF flavour, launch plans and the
  * installed-app file format. No sockets, no exec, no Android - JVM-tested.
  *
- * Two runtimes exist side by side in the PocketShell guest:
- *  - MUSL  - Alpine packages (`apk add`), built for the guest's own libc;
- *  - GLIBC - prebuilt aarch64 AppImages that run on the guest's glibc layer (`/lib/ld-linux-aarch64.so.1`).
+ * Two ways an app arrives in the PocketShell guest (Debian 13, glibc):
+ *  - DEB      - Debian packages (`apt-get install`), from the guest's own signed archive;
+ *  - APPIMAGE - prebuilt arm64 AppImages from the projects' own releases, running on the guest's glibc.
  */
 
-enum class Runtime(val label: String) { MUSL("musl"), GLIBC("glibc") }
+enum class Runtime(val label: String) { DEB("Debian"), APPIMAGE("AppImage") }
 
 enum class GuiCategory(val label: String) {
     BROWSER("Browsers"), OFFICE("Office & reading"), GRAPHICS("Graphics"), MEDIA("Audio & video"),
     DEV("Develop"), TOOLS("Files & tools"), TERMINAL("Terminals"), COMMS("Mail & chat"), NOTES("Notes"),
 }
 
-/** How a GLIBC app is delivered. */
+/** How an APPIMAGE-runtime app is delivered. */
 enum class Delivery { APPIMAGE, TARBALL_WEB }
 
-/** One installable app. MUSL apps carry an [apk] package; GLIBC apps a GitHub [repo] + [asset] pattern. */
+/** One installable app. DEB apps carry a Debian [pkg]; APPIMAGE apps a GitHub [repo] + [asset] pattern. */
 data class CatalogApp(
     val id: String,
     val name: String,
@@ -27,8 +27,8 @@ data class CatalogApp(
     val category: GuiCategory,
     val runtime: Runtime,
     val exec: String,
-    val apk: String? = null,
-    val extraApk: List<String> = emptyList(),
+    val pkg: String? = null,
+    val extraPkgs: List<String> = emptyList(),
     val repo: String? = null,
     val asset: String? = null,
     val delivery: Delivery = Delivery.APPIMAGE,
@@ -47,74 +47,75 @@ object GuiCatalog {
     val CHROMIUM_FLAGS = listOf("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage")
     val ELECTRON_FLAGS = CHROMIUM_FLAGS + "--ozone-platform=wayland"
 
-    private fun apk(id: String, name: String, cat: GuiCategory, exec: String, summary: String, pkg: String = id, heavy: Boolean = false, args: List<String> = emptyList(), extra: List<String> = emptyList()) =
-        CatalogApp(id, name, summary, cat, Runtime.MUSL, exec, apk = pkg, extraApk = extra, heavy = heavy, args = args)
+    private fun deb(id: String, name: String, cat: GuiCategory, exec: String, summary: String, pkg: String = id, heavy: Boolean = false, args: List<String> = emptyList(), extra: List<String> = emptyList()) =
+        CatalogApp(id, name, summary, cat, Runtime.DEB, exec, pkg = pkg, extraPkgs = extra, heavy = heavy, args = args)
 
     private fun image(id: String, name: String, cat: GuiCategory, exec: String, summary: String, repo: String, asset: String, args: List<String> = emptyList(), heavy: Boolean = true) =
-        CatalogApp(id, name, summary, cat, Runtime.GLIBC, exec, repo = repo, asset = asset, args = args, heavy = heavy)
+        CatalogApp(id, name, summary, cat, Runtime.APPIMAGE, exec, repo = repo, asset = asset, args = args, heavy = heavy)
 
     val all: List<CatalogApp> = listOf(
-        // ---- musl: Alpine packages (names and binaries checked against the aarch64 package index)
-        apk("firefox", "Firefox", GuiCategory.BROWSER, "firefox", "The Mozilla browser", heavy = true),
-        apk("chromium", "Chromium", GuiCategory.BROWSER, "chromium", "Chromium browser", heavy = true, args = CHROMIUM_FLAGS),
-        apk("falkon", "Falkon", GuiCategory.BROWSER, "falkon", "Light Qt web browser"),
-        apk("epiphany", "Web (Epiphany)", GuiCategory.BROWSER, "epiphany", "Simple GNOME browser"),
-        apk("qutebrowser", "qutebrowser", GuiCategory.BROWSER, "qutebrowser", "Keyboard-driven, vim-like browser"),
-        apk("libreoffice", "LibreOffice", GuiCategory.OFFICE, "libreoffice", "Writer, Calc, Impress - the full office suite", heavy = true),
-        apk("evince", "Evince", GuiCategory.OFFICE, "evince", "PDF and document viewer"),
-        apk("zathura", "Zathura", GuiCategory.OFFICE, "zathura", "Minimal keyboard-driven document viewer", extra = listOf("zathura-pdf-mupdf")),
-        apk("okular", "Okular", GuiCategory.OFFICE, "okular", "KDE universal document viewer"),
-        apk("scribus", "Scribus", GuiCategory.OFFICE, "scribus", "Desktop publishing"),
-        apk("mousepad", "Mousepad", GuiCategory.DEV, "mousepad", "Simple, fast text editor"),
-        apk("geany", "Geany", GuiCategory.DEV, "geany", "Fast, lightweight IDE"),
-        apk("gnome-text-editor", "GNOME Text Editor", GuiCategory.DEV, "gnome-text-editor", "Modern GNOME text editor"),
-        apk("kate", "Kate", GuiCategory.DEV, "kate", "KDE multi-document editor"),
-        apk("gvim", "gVim", GuiCategory.DEV, "gvim", "Vim with a GTK window"),
-        apk("emacs-x11", "Emacs (GUI)", GuiCategory.DEV, "emacs", "Emacs with the graphical front end", heavy = true),
-        apk("gimp", "GIMP", GuiCategory.GRAPHICS, "gimp", "Image editor", heavy = true),
-        apk("inkscape", "Inkscape", GuiCategory.GRAPHICS, "inkscape", "Vector drawing (SVG)", heavy = true),
-        apk("krita", "Krita", GuiCategory.GRAPHICS, "krita", "Digital painting", heavy = true),
-        apk("kolourpaint", "KolourPaint", GuiCategory.GRAPHICS, "kolourpaint", "Easy paint program"),
-        apk("pinta", "Pinta", GuiCategory.GRAPHICS, "pinta", "Simple paint program"),
-        apk("feh", "feh", GuiCategory.GRAPHICS, "feh", "Fast image viewer"),
-        apk("ristretto", "Ristretto", GuiCategory.GRAPHICS, "ristretto", "Xfce image viewer"),
-        apk("nomacs", "nomacs", GuiCategory.GRAPHICS, "nomacs", "Image viewer with browsing"),
-        apk("gwenview", "Gwenview", GuiCategory.GRAPHICS, "gwenview", "KDE image viewer"),
-        apk("darktable", "darktable", GuiCategory.GRAPHICS, "darktable", "Photo workflow and RAW developer", heavy = true),
-        apk("rawtherapee", "RawTherapee", GuiCategory.GRAPHICS, "rawtherapee", "RAW image processing", heavy = true),
-        apk("simple-scan", "Simple Scan", GuiCategory.GRAPHICS, "simple-scan", "Scan documents"),
-        apk("blender", "Blender", GuiCategory.GRAPHICS, "blender", "3D creation suite", heavy = true),
-        apk("freecad", "FreeCAD", GuiCategory.GRAPHICS, "FreeCAD", "Parametric 3D modeler", heavy = true),
-        apk("vlc", "VLC", GuiCategory.MEDIA, "vlc", "Plays almost any media", heavy = true),
-        apk("mpv", "mpv", GuiCategory.MEDIA, "mpv", "Minimal video player", args = listOf("--force-window=yes", "--idle=yes")),
-        apk("audacious", "Audacious", GuiCategory.MEDIA, "audacious", "Music player"),
-        apk("audacity", "Audacity", GuiCategory.MEDIA, "audacity", "Multitrack audio editor"),
-        apk("kdenlive", "Kdenlive", GuiCategory.MEDIA, "kdenlive", "Video editor", heavy = true),
-        apk("shotcut", "Shotcut", GuiCategory.MEDIA, "shotcut", "Video editor", heavy = true),
-        apk("obs-studio", "OBS Studio", GuiCategory.MEDIA, "obs", "Recording and streaming", heavy = true),
-        apk("pcmanfm", "PCManFM", GuiCategory.TOOLS, "pcmanfm", "Lightweight file manager"),
-        apk("thunar", "Thunar", GuiCategory.TOOLS, "thunar", "Xfce file manager"),
-        apk("xarchiver", "Xarchiver", GuiCategory.TOOLS, "xarchiver", "Archive manager"),
-        apk("galculator", "galculator", GuiCategory.TOOLS, "galculator", "Scientific calculator"),
-        apk("gnome-calculator", "GNOME Calculator", GuiCategory.TOOLS, "gnome-calculator", "Calculator"),
-        apk("keepassxc", "KeePassXC", GuiCategory.TOOLS, "keepassxc", "Password manager"),
-        apk("qbittorrent", "qBittorrent", GuiCategory.TOOLS, "qbittorrent", "BitTorrent client"),
-        apk("transmission-gtk", "Transmission", GuiCategory.TOOLS, "transmission-gtk", "BitTorrent client"),
-        apk("filezilla", "FileZilla", GuiCategory.TOOLS, "filezilla", "FTP / SFTP client"),
-        apk("remmina", "Remmina", GuiCategory.TOOLS, "remmina", "Remote desktop client (RDP, VNC, SSH)"),
-        apk("cutecom", "CuteCom", GuiCategory.TOOLS, "cutecom", "Serial terminal"),
-        apk("xterm", "xterm", GuiCategory.TERMINAL, "xterm", "The classic X terminal"),
-        apk("xfce4-terminal", "Xfce Terminal", GuiCategory.TERMINAL, "xfce4-terminal", "Modern terminal emulator"),
-        apk("lxterminal", "LXTerminal", GuiCategory.TERMINAL, "lxterminal", "Light VTE terminal"),
-        apk("foot", "foot", GuiCategory.TERMINAL, "foot", "Fast Wayland terminal"),
-        apk("alacritty", "Alacritty", GuiCategory.TERMINAL, "alacritty", "GPU terminal emulator"),
-        apk("sakura", "Sakura", GuiCategory.TERMINAL, "sakura", "Simple VTE terminal"),
-        apk("thunderbird", "Thunderbird", GuiCategory.COMMS, "thunderbird", "Mozilla mail client", heavy = true),
-        apk("claws-mail", "Claws Mail", GuiCategory.COMMS, "claws-mail", "Fast GTK mail client"),
-        apk("pidgin", "Pidgin", GuiCategory.COMMS, "pidgin", "Multi-protocol chat"),
-        apk("dino", "Dino", GuiCategory.COMMS, "dino", "Modern XMPP chat"),
+        // ---- Debian packages (names and binaries checked against Debian 13's arm64 Packages and Contents indexes;
+        //      gvim, emacs and freecad are update-alternatives links their packages create)
+        deb("firefox", "Firefox", GuiCategory.BROWSER, "firefox-esr", "The Mozilla browser (ESR)", pkg = "firefox-esr", heavy = true),
+        deb("chromium", "Chromium", GuiCategory.BROWSER, "chromium", "Chromium browser", heavy = true, args = CHROMIUM_FLAGS),
+        deb("falkon", "Falkon", GuiCategory.BROWSER, "falkon", "Light Qt web browser"),
+        deb("epiphany", "Web (Epiphany)", GuiCategory.BROWSER, "epiphany-browser", "Simple GNOME browser", pkg = "epiphany-browser"),
+        deb("qutebrowser", "qutebrowser", GuiCategory.BROWSER, "qutebrowser", "Keyboard-driven, vim-like browser"),
+        deb("libreoffice", "LibreOffice", GuiCategory.OFFICE, "libreoffice", "Writer, Calc, Impress - the full office suite", heavy = true),
+        deb("evince", "Evince", GuiCategory.OFFICE, "evince", "PDF and document viewer"),
+        deb("zathura", "Zathura", GuiCategory.OFFICE, "zathura", "Minimal keyboard-driven document viewer", extra = listOf("zathura-pdf-poppler")),
+        deb("okular", "Okular", GuiCategory.OFFICE, "okular", "KDE universal document viewer"),
+        deb("scribus", "Scribus", GuiCategory.OFFICE, "scribus", "Desktop publishing"),
+        deb("mousepad", "Mousepad", GuiCategory.DEV, "mousepad", "Simple, fast text editor"),
+        deb("geany", "Geany", GuiCategory.DEV, "geany", "Fast, lightweight IDE"),
+        deb("gnome-text-editor", "GNOME Text Editor", GuiCategory.DEV, "gnome-text-editor", "Modern GNOME text editor"),
+        deb("kate", "Kate", GuiCategory.DEV, "kate", "KDE multi-document editor"),
+        deb("gvim", "gVim", GuiCategory.DEV, "gvim", "Vim with a GTK window", pkg = "vim-gtk3"),
+        deb("emacs-x11", "Emacs (GUI)", GuiCategory.DEV, "emacs", "Emacs with the graphical front end", pkg = "emacs-gtk", heavy = true),
+        deb("gimp", "GIMP", GuiCategory.GRAPHICS, "gimp", "Image editor", heavy = true),
+        deb("inkscape", "Inkscape", GuiCategory.GRAPHICS, "inkscape", "Vector drawing (SVG)", heavy = true),
+        deb("krita", "Krita", GuiCategory.GRAPHICS, "krita", "Digital painting", heavy = true),
+        deb("kolourpaint", "KolourPaint", GuiCategory.GRAPHICS, "kolourpaint", "Easy paint program"),
+        deb("drawing", "Drawing", GuiCategory.GRAPHICS, "drawing", "Simple paint program"),
+        deb("feh", "feh", GuiCategory.GRAPHICS, "feh", "Fast image viewer"),
+        deb("ristretto", "Ristretto", GuiCategory.GRAPHICS, "ristretto", "Xfce image viewer"),
+        deb("nomacs", "nomacs", GuiCategory.GRAPHICS, "nomacs", "Image viewer with browsing"),
+        deb("gwenview", "Gwenview", GuiCategory.GRAPHICS, "gwenview", "KDE image viewer"),
+        deb("darktable", "darktable", GuiCategory.GRAPHICS, "darktable", "Photo workflow and RAW developer", heavy = true),
+        deb("rawtherapee", "RawTherapee", GuiCategory.GRAPHICS, "rawtherapee", "RAW image processing", heavy = true),
+        deb("simple-scan", "Simple Scan", GuiCategory.GRAPHICS, "simple-scan", "Scan documents"),
+        deb("blender", "Blender", GuiCategory.GRAPHICS, "blender", "3D creation suite", heavy = true),
+        deb("freecad", "FreeCAD", GuiCategory.GRAPHICS, "freecad", "Parametric 3D modeler", heavy = true),
+        deb("vlc", "VLC", GuiCategory.MEDIA, "vlc", "Plays almost any media", heavy = true),
+        deb("mpv", "mpv", GuiCategory.MEDIA, "mpv", "Minimal video player", args = listOf("--force-window=yes", "--idle=yes")),
+        deb("audacious", "Audacious", GuiCategory.MEDIA, "audacious", "Music player"),
+        deb("audacity", "Audacity", GuiCategory.MEDIA, "audacity", "Multitrack audio editor"),
+        deb("kdenlive", "Kdenlive", GuiCategory.MEDIA, "kdenlive", "Video editor", heavy = true),
+        deb("shotcut", "Shotcut", GuiCategory.MEDIA, "shotcut", "Video editor", heavy = true),
+        deb("obs-studio", "OBS Studio", GuiCategory.MEDIA, "obs", "Recording and streaming", heavy = true),
+        deb("pcmanfm", "PCManFM", GuiCategory.TOOLS, "pcmanfm", "Lightweight file manager"),
+        deb("thunar", "Thunar", GuiCategory.TOOLS, "thunar", "Xfce file manager"),
+        deb("xarchiver", "Xarchiver", GuiCategory.TOOLS, "xarchiver", "Archive manager"),
+        deb("galculator", "galculator", GuiCategory.TOOLS, "galculator", "Scientific calculator"),
+        deb("gnome-calculator", "GNOME Calculator", GuiCategory.TOOLS, "gnome-calculator", "Calculator"),
+        deb("keepassxc", "KeePassXC", GuiCategory.TOOLS, "keepassxc", "Password manager", pkg = "keepassxc-full"),
+        deb("qbittorrent", "qBittorrent", GuiCategory.TOOLS, "qbittorrent", "BitTorrent client"),
+        deb("transmission-gtk", "Transmission", GuiCategory.TOOLS, "transmission-gtk", "BitTorrent client"),
+        deb("filezilla", "FileZilla", GuiCategory.TOOLS, "filezilla", "FTP / SFTP client"),
+        deb("remmina", "Remmina", GuiCategory.TOOLS, "remmina", "Remote desktop client (RDP, VNC, SSH)"),
+        deb("cutecom", "CuteCom", GuiCategory.TOOLS, "cutecom", "Serial terminal"),
+        deb("xterm", "xterm", GuiCategory.TERMINAL, "xterm", "The classic X terminal"),
+        deb("xfce4-terminal", "Xfce Terminal", GuiCategory.TERMINAL, "xfce4-terminal", "Modern terminal emulator"),
+        deb("lxterminal", "LXTerminal", GuiCategory.TERMINAL, "lxterminal", "Light VTE terminal"),
+        deb("foot", "foot", GuiCategory.TERMINAL, "foot", "Fast Wayland terminal"),
+        deb("alacritty", "Alacritty", GuiCategory.TERMINAL, "alacritty", "GPU terminal emulator"),
+        deb("sakura", "Sakura", GuiCategory.TERMINAL, "sakura", "Simple VTE terminal"),
+        deb("thunderbird", "Thunderbird", GuiCategory.COMMS, "thunderbird", "Mozilla mail client", heavy = true),
+        deb("claws-mail", "Claws Mail", GuiCategory.COMMS, "claws-mail", "Fast GTK mail client"),
+        deb("pidgin", "Pidgin", GuiCategory.COMMS, "pidgin", "Multi-protocol chat"),
+        deb("dino", "Dino", GuiCategory.COMMS, "dino", "Modern XMPP chat", pkg = "dino-im"),
 
-        // ---- glibc: prebuilt arm64 AppImages from the projects' own releases (a SHA-256 from the release is checked)
+        // ---- AppImages: prebuilt arm64 builds from the projects' own releases (a SHA-256 from the release is checked)
         image("vscodium", "VSCodium", GuiCategory.DEV, "VSCodium", "VS Code without telemetry (self-contained 'anylinux' build)", "VSCodium/vscodium", "^VSCodium-.*-anylinux-aarch64\\.AppImage$", GuiCatalog.ELECTRON_FLAGS),
         image("gimp-appimage", "GIMP + PhotoGIMP", GuiCategory.GRAPHICS, "GIMP", "GIMP 3 with the PhotoGIMP layout (self-contained build)", "pkgforge-dev/GIMP-and-PhotoGIMP-AppImage", "^GIMP-.*-anylinux-aarch64\\.AppImage$"),
         image("keepassxc-appimage", "KeePassXC (official)", GuiCategory.TOOLS, "KeePassXC", "Password manager, the project's own AppImage", "keepassxreboot/keepassxc", "-aarch64\\.AppImage$", heavy = false),
@@ -128,7 +129,7 @@ object GuiCatalog {
         image("clapper", "Clapper", GuiCategory.MEDIA, "clapper", "Simple GTK media player", "pkgforge-dev/Clapper-AppImage", "anylinux-aarch64\\.AppImage$"),
         CatalogApp(
             id = "code-server", name = "code-server", summary = "VS Code in your browser - opens in the companion browser",
-            category = GuiCategory.DEV, runtime = Runtime.GLIBC, exec = "code-server", repo = "coder/code-server",
+            category = GuiCategory.DEV, runtime = Runtime.APPIMAGE, exec = "code-server", repo = "coder/code-server",
             asset = "-linux-arm64\\.tar\\.gz$", delivery = Delivery.TARBALL_WEB, heavy = true, webPort = 8080,
             args = listOf("--bind-addr", "127.0.0.1:8080", "--auth", "none", "--disable-telemetry"),
         ),
@@ -352,7 +353,7 @@ object LaunchPlan {
         val program = installedPath ?: app.exec
         val env = LinkedHashMap<String, String>(session)
         env.putAll(app.env)
-        if (app.delivery == Delivery.APPIMAGE && app.runtime == Runtime.GLIBC) env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+        if (app.delivery == Delivery.APPIMAGE && app.runtime == Runtime.APPIMAGE) env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
         return argv(program, app.args, env)
     }
 
@@ -394,7 +395,7 @@ object CustomApps {
     }
 
     fun make(id: String, name: String, url: String) = CatalogApp(
-        id = id, name = name.trim(), summary = "Added by you", category = GuiCategory.TOOLS, runtime = Runtime.GLIBC,
+        id = id, name = name.trim(), summary = "Added by you", category = GuiCategory.TOOLS, runtime = Runtime.APPIMAGE,
         exec = name.trim(), directUrl = url.trim(), args = GuiCatalog.ELECTRON_FLAGS.filter { it == "--no-sandbox" },
     )
 }
@@ -412,14 +413,14 @@ object LaunchDiagnosis {
                 "The desktop session is not reachable. Start the PocketShell desktop session, then launch again."
             "error while loading shared libraries" in t -> {
                 val lib = Regex("error while loading shared libraries: ([^:\\s]+)").find(log)?.groupValues?.get(1)
-                if (glibc) "A glibc library is missing${lib?.let { " ($it)" } ?: ""}. Run  pocketshell-doctor <program>  in the terminal to see what to add."
-                else "A library is missing${lib?.let { " ($it)" } ?: ""}. Install the Alpine package that provides it."
+                "A library is missing${lib?.let { " ($it)" } ?: ""}. Install the Debian package that provides it " +
+                    "(in the terminal: apt-get install apt-file, apt-file update, apt-file search ${lib ?: "<library>"})."
             }
             "fusermount" in t || "/dev/fuse" in t || "fuse: " in t -> "The AppImage tried to mount itself with FUSE, which this device cannot do. It is started in extract-and-run mode; if this repeats, the file may be an old type-1 AppImage."
             "exec format error" in t -> "That file is not an arm64 program."
             "no usable sandbox" in t || "setuid sandbox" in t || "sandbox" in t && "failed" in t -> "The browser engine refused to start without its sandbox. Chromium-based apps need --no-sandbox here."
             "permission denied" in t -> "The file is not executable or cannot be read."
-            "ld-linux" in t && "no such file" in t -> "The glibc layer is not installed in this Linux."
+            "ld-linux" in t && "no such file" in t -> "The C library loader is missing. Repair the Linux environment from Diagnostics."
             exitCode == 139 || "segmentation fault" in t -> "The program crashed (segmentation fault). Try again; if it repeats, a library it needs may not suit this device."
             exitCode == 132 || "illegal instruction" in t -> "The program used a CPU instruction this device does not have."
             else -> null
@@ -427,37 +428,51 @@ object LaunchDiagnosis {
     }
 }
 
-object ApkOutput {
+object AptOutput {
 
-    /** Did apk fail because its package index is missing / stale (so `apk update` then a retry may help)? */
+    /** Did apt fail because its package index is missing / stale (so `apt-get update` then a retry may help)? */
     fun needsUpdate(output: String): Boolean {
         val t = output.lowercase()
-        return "unable to select packages" in t || "no such package" in t || "unable to get" in t && "apkindex" in t || "temporary error" in t || "no such file" in t && "apkindex" in t
+        return "unable to locate package" in t || "has no installation candidate" in t || "404  not found" in t || "404 not found" in t
     }
 
-    /** One line a person can read from a failed apk run. */
+    /** One line a person can read from a failed apt run. */
     fun reason(stdout: String, stderr: String, error: String?): String {
         val all = (stderr + "\n" + stdout).lines().map { it.trim() }.filter { it.isNotEmpty() }
-        val errLine = all.lastOrNull { it.startsWith("ERROR") || it.contains("error:", true) || it.contains("unable", true) }
+        val errLine = all.lastOrNull { it.startsWith("E:") }
         return when {
-            all.any { it.contains("lock", true) && it.contains("database", true) } -> "Another package operation is running. Wait for it, then try again."
-            errLine != null -> errLine.take(200)
+            all.any { it.contains("Could not get lock", true) || it.contains("dpkg frontend lock", true) } ->
+                "Another package operation is running. Wait for it, then try again."
+            all.any { it.contains("Temporary failure resolving", true) || it.contains("Could not resolve", true) } ->
+                "The repository could not be reached. Check the connection."
+            errLine != null -> errLine.removePrefix("E:").trim().take(200)
             all.isNotEmpty() -> all.last().take(200)
-            else -> error ?: "apk failed without a message"
+            else -> error ?: "apt failed without a message"
         }
     }
 
-    /** `apk list -u` lines -> package name -> new version. */
+    private val UPGRADABLE = Regex("^([a-z0-9][a-z0-9.+-]*)/\\S+\\s+(\\S+)\\s+\\S+\\s+\\[upgradable from:")
+
+    /** `apt list --upgradable` lines (`name/suite new arch [upgradable from: old]`) -> package name -> new version. */
     fun upgradable(listOutput: String): Map<String, String> = listOutput.lines().mapNotNull { line ->
-        if ("[upgradable from:" !in line) return@mapNotNull null
-        val nv = line.substringBefore(' ')
-        ApkNames.split(nv)?.let { it.first to it.second }
+        UPGRADABLE.find(line.trim())?.let { it.groupValues[1] to it.groupValues[2] }
     }.toMap()
 }
 
-object ApkNames {
-    private val NV = Regex("^(.+)-([^-]+-r\\d+)$")
+/** The exact apt argv this plugin runs; package names are validated first. */
+object AptCmd {
 
-    /** `py3-foo-1.2.3-r0` -> (`py3-foo`, `1.2.3-r0`). */
-    fun split(nameVersion: String): Pair<String, String>? = NV.matchEntire(nameVersion)?.let { it.groupValues[1] to it.groupValues[2] }
+    private val NAME = Regex("^[a-z0-9][a-z0-9.+-]{0,80}$")
+    private val GET = listOf("env", "DEBIAN_FRONTEND=noninteractive", "/usr/bin/apt-get", "-q", "-y")
+
+    private fun names(list: List<String>): List<String> {
+        require(list.isNotEmpty() && list.all { NAME.matches(it) }) { "bad package name" }
+        return list
+    }
+
+    fun install(pkgs: List<String>) = GET + "install" + names(pkgs)
+    fun upgrade(pkg: String) = GET + listOf("install", "--only-upgrade") + names(listOf(pkg))
+    fun remove(pkg: String) = GET + listOf("remove", "--autoremove") + names(listOf(pkg))
+    val update = GET + "update"
+    val listUpgradable = listOf("env", "DEBIAN_FRONTEND=noninteractive", "/usr/bin/apt", "list", "--upgradable")
 }

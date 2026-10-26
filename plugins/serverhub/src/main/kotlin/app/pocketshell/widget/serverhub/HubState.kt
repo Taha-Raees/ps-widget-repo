@@ -134,7 +134,7 @@ class HubState(context: Context) {
         if (phase == Phase.STARTING || phase == Phase.RUNNING || phase == Phase.STOPPING) return
         val argv = Services.argv(s) ?: run { banner = Banner("The command is not valid any more - edit the service", bad = true); return }
         if (!files.hasProgram(argv.first())) {
-            val hint = Templates.all.firstOrNull { t -> argv.first() in t.needs }?.packages?.takeIf { it.isNotEmpty() }?.let { " - install it: apk add ${it.joinToString(" ")}" }.orEmpty()
+            val hint = Templates.all.firstOrNull { t -> argv.first() in t.needs }?.packages?.takeIf { it.isNotEmpty() }?.let { " - install it: apt-get install ${it.joinToString(" ")}" }.orEmpty()
             banner = Banner("${argv.first()} is not installed$hint", bad = true)
             return
         }

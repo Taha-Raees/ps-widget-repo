@@ -11,7 +11,7 @@ import app.pocketshell.widget.plugin.WidgetPlugin
 class NetworkPlugin : WidgetPlugin {
 
     override val pluginId: String = "network"
-    override val pluginVersion: String = "2.0.0"
+    override val pluginVersion: String = "2.0.1"
 
     override fun create(androidContext: Context): HomeApplication = NetworkApp
 }

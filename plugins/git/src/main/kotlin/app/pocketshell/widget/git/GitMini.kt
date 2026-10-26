@@ -57,7 +57,7 @@ private fun MiniStateBlock(ui: GitUi, scanning: Boolean, onOpenLinuxShell: () ->
         }
         ready != null && !ready.snapshot.hasGit -> {
             StateLine("Git is not installed")
-            MonoText(text = "Install it from the Linux Shell (apk add git).", color = HomeTokens.textDim)
+            MonoText(text = "Install it from the Linux Shell (apt install git).", color = HomeTokens.textDim)
             TextButton(onClick = onOpenLinuxShell) { Text("Open Linux", color = HomeTokens.accent) }
         }
         ready != null -> {

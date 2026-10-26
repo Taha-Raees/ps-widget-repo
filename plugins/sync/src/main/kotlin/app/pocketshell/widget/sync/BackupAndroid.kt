@@ -33,7 +33,7 @@ import java.io.OutputStream
 
 // ------------------------------------------------------------------ guest
 
-/** Runs a guest job under the minimal PACKAGE_OPERATION profile (tar/gzip/zstd/apk need no /proc). */
+/** Runs a guest job under the PACKAGE_OPERATION profile (tar/gzip/zstd/apt; no PTY, no prompt). */
 internal class AndroidGuestJobRunner(private val appContext: Context) : GuestJobRunner {
 
     override fun start(argv: List<String>): RunningJob {

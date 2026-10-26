@@ -21,11 +21,11 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Packages & Environment - add, update and remove apk packages and CLI tool bundles, and look after the
+ * Packages & Environment - add, update and remove Debian packages and CLI tool bundles, and look after the
  * Linux environment (repositories, cache, repair).
  *
  * Cost policy: the card is a pure view of two small local file reads (the installed database and the world file),
- * taken once after it has stayed on screen. Nothing polls. `apk` runs only on a tap, and every change is simulated
+ * taken once after it has stayed on screen. Nothing polls. apt runs only on a tap, and every change is simulated
  * and confirmed first.
  */
 object PkgApp : HomeApplication() {

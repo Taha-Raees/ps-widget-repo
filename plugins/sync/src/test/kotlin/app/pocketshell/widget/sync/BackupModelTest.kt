@@ -214,16 +214,20 @@ class BackupModelTest {
     }
 
     @Test
-    fun `compatibility - a different architecture or a newer format blocks, a different alpine warns`() {
-        val ok = Compatibility.check(BackupRecord("n", 1, "h", manifest(), arch = "aarch64", alpine = "3.24.2"), manifest(), "aarch64", "3.24.4")
+    fun `compatibility - a different architecture or a newer format blocks, another release or distribution warns`() {
+        val ok = Compatibility.check(BackupRecord("n", 1, "h", manifest(), arch = "aarch64", alpine = "debian 13.7"), manifest(), "aarch64", "debian 13.9")
         assertTrue(ok.ok)
         assertTrue(ok.warnings.isEmpty())
-        val minor = Compatibility.check(BackupRecord("n", 1, "h", manifest(), arch = "aarch64", alpine = "3.22.1"), manifest(), "aarch64", "3.24.2")
-        assertTrue(minor.ok)
-        assertEquals(1, minor.warnings.size)
+        val major = Compatibility.check(BackupRecord("n", 1, "h", manifest(), arch = "aarch64", alpine = "debian 13.7"), manifest(), "aarch64", "debian 14.1")
+        assertTrue(major.ok)
+        assertEquals(1, major.warnings.size)
+        // A backup from the earlier Alpine guest restores its files; its apk package list does not apply.
+        val alpine = Compatibility.check(BackupRecord("n", 1, "h", manifest(), arch = "aarch64", alpine = "3.24.2"), manifest(), "aarch64", "debian 13.7")
+        assertTrue(alpine.ok)
+        assertTrue(alpine.warnings.single().contains("Alpine names and is not reinstalled"))
         val arch = Compatibility.check(BackupRecord("n", 1, "h", manifest(), arch = "x86_64"), manifest(), "aarch64", null)
         assertFalse(arch.ok)
-        val newer = Compatibility.check(null, manifest().copy(format = 5), "aarch64", "3.24.2")
+        val newer = Compatibility.check(null, manifest().copy(format = 5), "aarch64", "debian 13.7")
         assertFalse(newer.ok)
         // Unknown on either side is not an error — nothing is invented.
         assertTrue(Compatibility.check(null, manifest(), null, null).ok)
@@ -233,10 +237,19 @@ class BackupModelTest {
 
     @Test
     fun `the package list keeps valid entries in order and drops noise and anything odd`() {
-        val world = "alpine-baselayout\n\n# comment\nbash\ngit>=2.40\n  openjdk21  \nbash\nbad name\n\$(rm -rf)\n-x\n;ls\ncurl@testing\n"
-        assertEquals(listOf("alpine-baselayout", "bash", "git>=2.40", "openjdk21", "curl@testing"), ApkWorld.parse(world))
-        assertTrue(ApkWorld.parse(null).isEmpty())
-        assertTrue(ApkWorld.parse("").isEmpty())
+        val list = "base-files\n\n# comment\nbash\ng++\n  openjdk-21-jdk-headless  \nbash\nlibc6:arm64\nbad name\n\$(rm -rf)\n-x\n;ls\nGit\n"
+        assertEquals(listOf("base-files", "bash", "g++", "openjdk-21-jdk-headless", "libc6:arm64"), PkgList.parse(list))
+        assertTrue(PkgList.parse(null).isEmpty())
+        assertTrue(PkgList.parse("").isEmpty())
+    }
+
+    @Test
+    fun `the manual set is installed minus automatic, read from the dpkg files`() {
+        val status = "Package: libc6\nStatus: install ok installed\n\nPackage: bash\nStatus: install ok installed\n\n" +
+            "Package: vim\nStatus: deinstall ok config-files\n\nPackage: git\nStatus: install ok installed\n"
+        val ext = "Package: libc6\nArchitecture: arm64\nAuto-Installed: 1\n\nPackage: git\nArchitecture: arm64\nAuto-Installed: 0\n"
+        assertEquals(listOf("bash", "git"), PkgList.manual(status, ext))
+        assertTrue(PkgList.manual(null, null).isEmpty())
     }
 
     @Test

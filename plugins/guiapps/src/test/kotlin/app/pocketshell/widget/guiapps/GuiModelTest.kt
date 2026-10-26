@@ -20,8 +20,9 @@ class GuiModelTest {
             assertTrue("${a.id} id is a slug", a.id.matches(Regex("^[a-z0-9-]{1,40}$")))
             assertTrue("${a.id} has a name and summary", a.name.isNotBlank() && a.summary.isNotBlank() && a.exec.isNotBlank())
             when (a.runtime) {
-                Runtime.MUSL -> assertTrue("${a.id} needs an apk package", !a.apk.isNullOrBlank() && a.repo == null)
-                Runtime.GLIBC -> {
+                Runtime.DEB -> assertTrue("${a.id} needs a Debian package", !a.pkg.isNullOrBlank() && a.repo == null &&
+                    (listOf(a.pkg!!) + a.extraPkgs).all { it.matches(Regex("^[a-z0-9][a-z0-9.+-]*$")) })
+                Runtime.APPIMAGE -> {
                     assertTrue("${a.id} needs a repo", a.repo!!.matches(Regex("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")))
                     assertNotNull("${a.id} asset pattern compiles", runCatching { Regex(a.asset!!) }.getOrNull())
                 }
@@ -30,21 +31,33 @@ class GuiModelTest {
     }
 
     @Test fun catalogHasBothRuntimes() {
-        assertTrue(GuiCatalog.all.count { it.runtime == Runtime.MUSL } >= 30)
-        assertTrue(GuiCatalog.all.count { it.runtime == Runtime.GLIBC } >= 8)
+        assertTrue(GuiCatalog.all.count { it.runtime == Runtime.DEB } >= 30)
+        assertTrue(GuiCatalog.all.count { it.runtime == Runtime.APPIMAGE } >= 8)
         for (c in GuiCategory.entries) assertTrue("${c.label} is not empty", GuiCatalog.all.any { it.category == c })
     }
 
     @Test fun glibcAppImagesRunWithoutFuse() {
         val plan = LaunchPlan.forCatalog(GuiCatalog.byId("keepassxc-appimage")!!, "/root/Applications/x/K.AppImage", mapOf("DISPLAY" to ":0"))
         assertTrue("APPIMAGE_EXTRACT_AND_RUN=1" in plan)
-        val musl = LaunchPlan.forCatalog(GuiCatalog.byId("xterm")!!, null, mapOf("DISPLAY" to ":0"))
-        assertFalse("APPIMAGE_EXTRACT_AND_RUN=1" in musl)
+        val deb = LaunchPlan.forCatalog(GuiCatalog.byId("xterm")!!, null, mapOf("DISPLAY" to ":0"))
+        assertFalse("APPIMAGE_EXTRACT_AND_RUN=1" in deb)
+    }
+
+    @Test fun debianNamesFollowTheArchive() {
+        // Debian's own names where they differ from the upstream project's (checked against the trixie arm64 index)
+        assertEquals("firefox-esr", GuiCatalog.byId("firefox")!!.pkg)
+        assertEquals("firefox-esr", GuiCatalog.byId("firefox")!!.exec)
+        assertEquals("vim-gtk3", GuiCatalog.byId("gvim")!!.pkg)
+        assertEquals("emacs-gtk", GuiCatalog.byId("emacs-x11")!!.pkg)
+        assertEquals("dino-im", GuiCatalog.byId("dino")!!.pkg)
+        assertEquals("keepassxc-full", GuiCatalog.byId("keepassxc")!!.pkg)
+        assertEquals(listOf("zathura-pdf-poppler"), GuiCatalog.byId("zathura")!!.extraPkgs)
+        assertNull("Pinta is not in Debian 13", GuiCatalog.byId("pinta"))
     }
 
     @Test fun searchFiltersByTextRuntimeAndCategory() {
         assertTrue(GuiCatalog.search("firefox", null, null).any { it.id == "firefox" })
-        assertTrue(GuiCatalog.search("", Runtime.GLIBC, null).all { it.runtime == Runtime.GLIBC })
+        assertTrue(GuiCatalog.search("", Runtime.APPIMAGE, null).all { it.runtime == Runtime.APPIMAGE })
         assertTrue(GuiCatalog.search("", null, GuiCategory.TERMINAL).all { it.category == GuiCategory.TERMINAL })
         assertTrue(GuiCatalog.search("zzzz-nothing", null, null).isEmpty())
         assertEquals(GuiCatalog.search("", null, null).map { it.name.lowercase() }, GuiCatalog.search("", null, null).map { it.name.lowercase() }.sorted())
@@ -185,9 +198,10 @@ class GuiModelTest {
     }
 
     @Test fun realBinariesOnThisDeviceAreClassifiedWhenPresent() {
-        val musl = File("/usr/bin/xterm")
-        assumeTrue(musl.isFile)
-        assertEquals(Flavour.MUSL, Elf.flavour(musl.inputStream().use { it.readNBytes(65_536) }))
+        val busybox = File("/bin/busybox") // an Alpine host (the musl build machine) has one
+        if (busybox.isFile && File("/etc/alpine-release").isFile) {
+            assertEquals(Flavour.MUSL, Elf.flavour(busybox.inputStream().use { it.readNBytes(65_536) }))
+        }
         val loader = File("/lib/ld-linux-aarch64.so.1")
         assumeTrue(loader.isFile)
         val f = Elf.flavour(loader.inputStream().use { it.readNBytes(65_536) })

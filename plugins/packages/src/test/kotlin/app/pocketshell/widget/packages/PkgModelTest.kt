@@ -11,139 +11,178 @@ import org.junit.Test
 
 class PkgModelTest {
 
+    // Shaped like the real /var/lib/dpkg/status of the Debian 13 guest (fields trimmed).
     private val db = """
-        C:Q1aaa=
-        P:mousepad
-        V:0.7.0-r0
-        A:aarch64
-        I:852000
-        T:Simple Text Editor for Xfce4
-        U:https://gitlab.xfce.org/apps/mousepad
-        o:mousepad
-        D:desktop-file-utils so:libgtk-3.so.0 so:libc.musl-aarch64.so.1
-        p:cmd:mousepad=0.7.0-r0 so:libmousepad.so.0=0.0.0
+        Package: mousepad
+        Status: install ok installed
+        Priority: optional
+        Section: editors
+        Installed-Size: 832
+        Maintainer: Debian Xfce Maintainers
+        Architecture: arm64
+        Version: 0.6.3-1
+        Depends: desktop-file-utils, libgtk-3-0t64 (>= 3.22), libc6 (>= 2.34)
+        Description: simple Xfce oriented text editor
+         Mousepad is a text editor for Xfce based on Leafpad.
+        Homepage: https://docs.xfce.org/apps/mousepad/start
 
-        C:Q1bbb=
-        P:gtk+3.0
-        V:3.24.43-r2
-        A:aarch64
-        I:9000000
-        T:The GTK+ Toolkit (v3)
-        D:so:libc.musl-aarch64.so.1
-        p:so:libgtk-3.so.0=0.2417.32
+        Package: libgtk-3-0t64
+        Status: install ok installed
+        Priority: optional
+        Installed-Size: 8901
+        Architecture: arm64
+        Source: gtk+3.0
+        Version: 3.24.49-3
+        Provides: libgtk-3-0 (= 3.24.49-3)
+        Depends: libc6 (>= 2.34) | libc6.1
+        Description: GTK graphical user interface library
 
-        C:Q1ccc=
-        P:musl
-        V:1.2.5-r10
-        A:aarch64
-        I:700000
-        T:the musl c library
-        p:so:libc.musl-aarch64.so.1=1
+        Package: libc6
+        Status: install ok installed
+        Priority: optional
+        Installed-Size: 12000
+        Architecture: arm64
+        Version: 2.41-12+deb13u4
+        Description: GNU C Library: Shared libraries
 
-        C:Q1ddd=
-        P:desktop-file-utils
-        V:0.28-r0
-        A:aarch64
-        I:200000
-        T:Command line utilities
-        D:so:libc.musl-aarch64.so.1
+        Package: desktop-file-utils
+        Status: install ok installed
+        Priority: optional
+        Installed-Size: 200
+        Architecture: arm64
+        Version: 0.28-1
+        Pre-Depends: libc6 (>= 2.34)
+        Description: Utilities for .desktop files
+
+        Package: coreutils
+        Essential: yes
+        Status: install ok installed
+        Priority: required
+        Installed-Size: 18000
+        Architecture: arm64
+        Version: 9.7-3
+        Description: GNU core utilities
+
+        Package: vim
+        Status: deinstall ok config-files
+        Priority: optional
+        Architecture: arm64
+        Version: 2:9.1.1230-2
+        Description: removed, only its configuration is left
 
     """.trimIndent()
 
     @Test fun databaseIsParsed() {
-        val pkgs = ApkDb.parse(db)
-        assertEquals(listOf("mousepad", "gtk+3.0", "musl", "desktop-file-utils"), pkgs.map { it.name })
+        val pkgs = DpkgStatus.parse(db)
+        assertEquals(listOf("mousepad", "libgtk-3-0t64", "libc6", "desktop-file-utils", "coreutils"), pkgs.map { it.name })
         val m = pkgs.first()
-        assertEquals("0.7.0-r0", m.version); assertEquals(852000L, m.installedBytes)
-        assertEquals(3, m.depends.size); assertEquals("https://gitlab.xfce.org/apps/mousepad", m.url)
-        assertTrue(ApkDb.parse("").isEmpty())
-        assertTrue(ApkDb.parse("garbage\nmore garbage").isEmpty())
+        assertEquals("0.6.3-1", m.version); assertEquals(832L * 1024, m.installedBytes)
+        assertEquals(listOf("desktop-file-utils", "libgtk-3-0t64", "libc6"), m.depends)
+        assertEquals("https://docs.xfce.org/apps/mousepad/start", m.url)
+        assertEquals("simple Xfce oriented text editor", m.description)
+        assertEquals("gtk+3.0", pkgs[1].origin)
+        assertTrue(pkgs.last().essential); assertFalse(m.essential)
+        assertTrue(DpkgStatus.parse("").isEmpty())
+        assertTrue(DpkgStatus.parse("garbage\nmore garbage").isEmpty())
+    }
+
+    @Test fun dependencyTokensDropVersionsArchAndKeepAlternatives() {
+        assertEquals(listOf("a", "b", "c", "d"), DpkgStatus.depTokens("a (>= 1), b | c, d:any"))
+        assertTrue(DpkgStatus.depTokens(null).isEmpty())
     }
 
     @Test fun reverseDependenciesResolveVirtualsThroughProvides() {
-        val rev = Deps.requiredBy(ApkDb.parse(db))
-        assertEquals(listOf("mousepad"), rev["gtk+3.0"])
+        val rev = Deps.requiredBy(DpkgStatus.parse(db) + Pkg("old-app", "1", "arm64", 0, "", null, null, listOf("libgtk-3-0"), emptyList()))
+        assertEquals(listOf("mousepad", "old-app"), rev["libgtk-3-0t64"])
         assertEquals(listOf("mousepad"), rev["desktop-file-utils"])
-        assertEquals(listOf("desktop-file-utils", "gtk+3.0", "mousepad"), rev["musl"])
+        assertEquals(listOf("desktop-file-utils", "libgtk-3-0t64", "mousepad"), rev["libc6"])
         assertNull(rev["mousepad"])
     }
 
-    @Test fun worldFileKeepsNamesOnly() {
-        assertEquals(setOf("alpine-base", "bash", "gtk+3.0", "foo"), World.parse("alpine-base\nbash\n\n gtk+3.0 \nfoo>=1.2\n"))
+    @Test fun manualSetIsInstalledMinusAutomaticAndBase() {
+        val auto = ManualMarks.parseAuto("Package: libc6\nArchitecture: arm64\nAuto-Installed: 1\n\nPackage: desktop-file-utils\nArchitecture: arm64\nAuto-Installed: 1\n\nPackage: mousepad\nArchitecture: arm64\nAuto-Installed: 0\n")
+        assertEquals(setOf("libc6", "desktop-file-utils"), auto)
+        assertEquals(setOf("mousepad", "libgtk-3-0t64"), ManualMarks.added(DpkgStatus.parse(db), auto))
+        assertTrue(ManualMarks.parseAuto("").isEmpty())
     }
 
     @Test fun filterByScopeAndText() {
-        val pkgs = ApkDb.parse(db)
+        val pkgs = DpkgStatus.parse(db)
         val world = setOf("mousepad")
         assertEquals(listOf("mousepad"), PkgFilter.apply(pkgs, world, Scope.ADDED, "").map { it.name })
-        assertEquals(4, PkgFilter.apply(pkgs, world, Scope.ALL, "").size)
-        assertEquals(listOf("gtk+3.0"), PkgFilter.apply(pkgs, world, Scope.ALL, "toolkit").map { it.name })
+        assertEquals(5, PkgFilter.apply(pkgs, world, Scope.ALL, "").size)
+        assertEquals(listOf("libgtk-3-0t64"), PkgFilter.apply(pkgs, world, Scope.ALL, "graphical").map { it.name })
         assertTrue(PkgFilter.apply(pkgs, world, Scope.ADDED, "gtk").isEmpty())
     }
 
     // ------------------------------------------------------------------ plans
 
+    // Real `apt-get -q -y install --simulate tmux mc` output from the Debian 13 guest (trimmed).
     private val install = """
-        (1/3) Installing libxfce4ui (4.20.1-r1)
-        (2/3) Installing xfconf (4.20.0-r2)
-        (3/3) Installing mousepad (0.7.0-r0)
-        OK: 1870.3 MiB in 431 packages
+        0 upgraded, 9 newly installed, 0 to remove and 1 not upgraded.
+        Inst sensible-utils (0.0.25 Debian:13.7/stable [all])
+        Inst libevent-core-2.1-7t64 (2.1.13-stable-1~deb13u1 Debian-Security:13/stable-security [arm64])
+        Inst tmux (3.5a-3 Debian:13.7/stable [arm64])
+        Conf sensible-utils (0.0.25 Debian:13.7/stable [all])
+        Conf tmux (3.5a-3 Debian:13.7/stable [arm64])
     """.trimIndent()
 
     @Test fun installPlan() {
         val p = PlanParse.parse(install)
-        assertEquals(3, p.installs.size)
-        assertEquals("mousepad", p.installs.last().name)
-        assertEquals(1870.3, p.resultMiB!!, 0.001); assertEquals(431, p.resultPackages)
-        val delta = p.deltaBytes(1951856262L)!!
-        assertTrue("about +9 MiB: $delta", delta in 9_000_000L..9_800_000L)
+        assertEquals(listOf("sensible-utils", "libevent-core-2.1-7t64", "tmux"), p.installs.map { it.name })
+        assertEquals("2.1.13-stable-1~deb13u1", p.installs[1].version)
+        // apt prints no size line in simulation mode: the change is honestly unknown
+        assertNull(p.deltaBytes(1_000_000L))
     }
 
-    @Test fun upgradeAndRemovalPlans() {
-        val up = PlanParse.parse("(22/24) Upgrading vim-common (9.2.1091-r0 -> 9.2.1202-r0)\n(24/24) Upgrading vim (9.2.1091-r0 -> 9.2.1202-r0)\nOK: 1861.7 MiB in 419 packages")
+    @Test fun upgradeReinstallAndRemovalPlans() {
+        val up = PlanParse.parse("Inst vim-common [2:9.1.1230-2] (2:9.1.1230-3 Debian:13.8/stable [all])\nInst vim [2:9.1.1230-2] (2:9.1.1230-3 Debian:13.8/stable [arm64])")
         assertEquals(listOf("vim-common", "vim"), up.upgrades.map { it.name })
-        assertEquals("9.2.1091-r0", up.upgrades[0].from); assertEquals("9.2.1202-r0", up.upgrades[0].version)
-        val del = PlanParse.parse("(1/3) Purging xterm (410-r0)\n(2/3) Purging libxaw (1.0.16-r1)\n(3/3) Purging libxpm (3.5.20-r0)\nOK: 1860.0 MiB in 416 packages")
-        assertEquals(3, del.removals.size)
-        assertTrue(PlanParse.parse("OK: 1861.4 MiB in 419 packages").isEmpty)
+        assertEquals("2:9.1.1230-2", up.upgrades[0].from); assertEquals("2:9.1.1230-3", up.upgrades[0].version)
+        val re = PlanParse.parse("Inst nano [8.4-1+deb13u1] (8.4-1+deb13u1 Debian:13.7/stable [arm64])")
+        assertEquals(ChangeKind.REINSTALL, re.changes.single().kind)
+        // real: a removal line can name the packages it breaks in a second bracket
+        val del = PlanParse.parse("Remv python3-yaml [6.0.2-1+b2]\nRemv python3-jaraco.text [4.0.0-1] [python3-setuptools:arm64 ]\nPurg xterm [398-1]")
+        assertEquals(listOf("python3-yaml", "python3-jaraco.text", "xterm"), del.removals.map { it.name })
+        assertTrue(PlanParse.parse("0 upgraded, 0 newly installed, 0 to remove and 1 not upgraded.").isEmpty)
         assertTrue(PlanParse.parse("nonsense").isEmpty)
-        assertNull(PlanParse.parse("nonsense").resultMiB)
     }
 
-    @Test fun totalsInOtherUnits() {
-        assertEquals(2048.0, PlanParse.parse("OK: 2 GiB in 5 packages").resultMiB!!, 0.001)
-        assertEquals(0.5, PlanParse.parse("OK: 512 KiB in 1 package").resultMiB!!, 0.001)
+    @Test fun sizeLineWhenAptPrintsOne() {
+        assertEquals(12_300_000L, PlanParse.parse("After this operation, 12.3 MB of additional disk space will be used.").deltaBytes(0))
+        assertEquals(-1_024_000L, PlanParse.parse("After this operation, 1,024 kB disk space will be freed.").deltaBytes(0))
     }
 
-    @Test fun delThatCannotCascadeIsExplained() {
-        val out = "World updated, but the following packages are not removed due to:\n  busybox: coreutils glib-dev gnome-keyring\n           firefox util-linux bash npm\n  gtk+3.0: firefox\n\nOK: 1861.4 MiB in 419 packages"
-        val nr = NotRemoved.parse(out)
-        assertEquals(listOf("coreutils", "glib-dev", "gnome-keyring", "firefox", "util-linux", "bash", "npm"), nr["busybox"])
-        assertEquals(listOf("firefox"), nr["gtk+3.0"])
-        assertTrue(NotRemoved.parse("(1/1) Purging xterm (410-r0)\nOK: 1 MiB in 1 packages").isEmpty())
+    @Test fun aptRemovalLeavesNothingBehindToExplain() {
+        assertTrue(NotRemoved.parse("Remv xterm [398-1]").isEmpty())
     }
 
-    @Test fun apkCommandsAreBuiltFromValidatedNames() {
-        assertEquals(listOf("/sbin/apk", "--no-progress", "add", "--simulate", "git", "curl"), ApkCmd.add(listOf("git", "curl"), simulate = true))
-        assertEquals(listOf("/sbin/apk", "--no-progress", "add", "-u", "vim"), ApkCmd.add(listOf("vim"), simulate = false, upgrade = true))
-        assertEquals(listOf("/sbin/apk", "--no-progress", "del", "xterm"), ApkCmd.del(listOf("xterm"), simulate = false))
-        assertEquals(listOf("/sbin/apk", "--no-progress", "upgrade", "--simulate"), ApkCmd.upgradeAll(true))
-        assertEquals(listOf("/sbin/apk", "--no-progress", "search", "-v", "-d", "text editor"), ApkCmd.search("text editor"))
-        assertTrue(runCatching { ApkCmd.add(listOf("--allow-untrusted"), false) }.isFailure)
-        assertTrue(runCatching { ApkCmd.del(listOf("x; reboot"), false) }.isFailure)
-        assertTrue(runCatching { ApkCmd.search("a") }.isFailure)
-        assertTrue(runCatching { ApkCmd.search("-X --repository http://evil") }.isFailure)
-        assertTrue(runCatching { ApkCmd.info("../x") }.isFailure)
+    @Test fun aptCommandsAreBuiltFromValidatedNames() {
+        val env = listOf("env", "DEBIAN_FRONTEND=noninteractive")
+        val get = env + listOf("/usr/bin/apt-get", "-q", "-y")
+        assertEquals(get + listOf("install", "--simulate", "git", "curl"), AptCmd.add(listOf("git", "curl"), simulate = true))
+        assertEquals(get + listOf("install", "--only-upgrade", "vim"), AptCmd.add(listOf("vim"), simulate = false, upgrade = true))
+        assertEquals(get + listOf("remove", "--autoremove", "xterm"), AptCmd.del(listOf("xterm"), simulate = false))
+        assertEquals(get + listOf("upgrade", "--with-new-pkgs", "--simulate"), AptCmd.upgradeAll(true))
+        assertEquals(env + listOf("/usr/bin/apt-cache", "search", "--", "text editor"), AptCmd.search("text editor"))
+        assertEquals(env + listOf("/usr/bin/apt", "list", "--upgradable"), AptCmd.listUpgradable)
+        assertTrue(runCatching { AptCmd.add(listOf("--allow-unauthenticated"), false) }.isFailure)
+        assertTrue(runCatching { AptCmd.del(listOf("x; reboot"), false) }.isFailure)
+        assertTrue(runCatching { AptCmd.search("a") }.isFailure)
+        assertTrue(runCatching { AptCmd.search("-o Dir=/evil") }.isFailure)
+        assertTrue(runCatching { AptCmd.info("../x") }.isFailure)
     }
 
     // ----------------------------------------------------------------- guards
 
     @Test fun protectedPackagesCannotBeRemoved() {
-        val bad = PlanParse.parse("(1/2) Purging foo (1-r0)\n(2/2) Purging busybox (1.37-r0)\nOK: 1 MiB in 1 packages")
-        assertTrue(RemovalGuard.check(bad)!!.contains("busybox"))
-        val fine = PlanParse.parse("(1/1) Purging xterm (410-r0)\nOK: 1 MiB in 1 packages")
+        val bad = PlanParse.parse("Remv foo [1]\nRemv dpkg [1.22.21]")
+        assertTrue(RemovalGuard.check(bad)!!.contains("dpkg"))
+        val fine = PlanParse.parse("Remv xterm [398-1]")
         assertNull(RemovalGuard.check(fine))
         assertFalse(RemovalGuard.needsTypedConfirm(fine))
+        // anything the database marks Essential / required is protected too
+        assertTrue(RemovalGuard.check(PlanParse.parse("Remv coreutils [9.7-3]"), setOf("coreutils"))!!.contains("coreutils"))
     }
 
     @Test fun bigRemovalsNeedAStrongerConfirmOrAreRefused() {
@@ -154,41 +193,46 @@ class PkgModelTest {
     }
 
     @Test fun packageNamesAreValidated() {
-        assertEquals(listOf("git", "gtk+3.0", "py3-pip"), PkgNames.parseList("git, gtk+3.0  py3-pip,git"))
+        assertEquals(listOf("git", "libgtk-3-0t64", "python3-pip", "g++"), PkgNames.parseList("git, libgtk-3-0t64  python3-pip,git g++"))
         assertNull(PkgNames.parseList(""))
         assertNull(PkgNames.parseList("-s"))
         assertNull(PkgNames.parseList("git; rm -rf /"))
         assertNull(PkgNames.parseList("a/b"))
         assertNull(PkgNames.parseList((1..17).joinToString(" ") { "p$it" }))
-        assertTrue(PkgNames.valid("openjdk21-jdk"))
-        assertFalse(PkgNames.valid("--allow-untrusted"))
+        assertTrue(PkgNames.valid("openjdk-21-jdk-headless"))
+        assertFalse(PkgNames.valid("--allow-unauthenticated"))
+        assertFalse("Debian names are lowercase", PkgNames.valid("Nano"))
     }
 
     // ---------------------------------------------------------------- search
 
     @Test fun searchRanksExactThenPrefix() {
-        val out = "faenza-icon-theme-xterm-1.3.1-r6 - faenza xterm\nlxterminal-0.4.0-r2 - VTE terminal\nxterm-410-r0 - X Terminal Emulator\nxterm-doc-410-r0 - docs\nexpect-5.45.4-r5 - tool"
+        // real `apt-cache search -- xterm` lines (plus the package itself)
+        val out = "libconvert-color-xterm-perl - module for indexed colors used by XTerm\nlxterminal - LXDE terminal emulator\nxterm - X terminal emulator\nxterm-doc - docs\nlibjs-xterm - terminal front-end component for the browser - browser library"
         val hits = SearchParse.parse(out, "xterm")
         assertEquals("xterm", hits[0].name)
         assertEquals("xterm-doc", hits[1].name)
-        assertEquals("410-r0", hits[0].version)
-        assertEquals("X Terminal Emulator", hits[0].description)
+        assertEquals("", hits[0].version)
+        assertEquals("X terminal emulator", hits[0].description)
+        assertEquals("terminal front-end component for the browser - browser library", hits.first { it.name == "libjs-xterm" }.description)
         assertEquals(5, hits.size)
         assertTrue(SearchParse.parse("garbage line", "x").isEmpty())
     }
 
     @Test fun upgradableParse() {
-        val u = UpgradeParse.parse("brotli-libs-1.2.1-r0 aarch64 {brotli} (MIT) [upgradable from: brotli-libs-1.2.0-r1]\nxterm-410-r0 aarch64 {xterm} (X11) [installed]")
-        assertEquals(listOf(Upgradable("brotli-libs", "1.2.0-r1", "1.2.1-r0")), u)
+        val u = UpgradeParse.parse("Listing...\ntzdata/stable-updates 2026e-0+deb13u1 all [upgradable from: 2026c-0+deb13u1]\nnano/stable,now 8.4-1 arm64 [installed]")
+        assertEquals(listOf(Upgradable("tzdata", "2026c-0+deb13u1", "2026e-0+deb13u1")), u)
     }
 
     @Test fun errorsAreExplained() {
-        assertTrue(ApkErrors.reason("", "ERROR: Unable to lock database: Resource busy", null).contains("Another package operation"))
-        assertTrue(ApkErrors.reason("", "ERROR: unable to select packages:\n  nosuch (no such package):\n    required by: world[nosuch]", null).contains("no such package"))
-        assertTrue(ApkErrors.reason("", "WARNING: fetch failed\ntemporary error (try again later)", null).contains("could not be reached"))
-        assertEquals("exec failed", ApkErrors.reason("", "", "exec failed"))
-        assertTrue(ApkErrors.needsUpdate("ERROR: unable to select packages:\n x (no such package)"))
-        assertFalse(ApkErrors.needsUpdate("OK: 1 MiB in 1 packages"))
+        assertTrue(AptErrors.reason("", "E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process 123 (apt-get)", null).contains("Another package operation"))
+        assertTrue(AptErrors.reason("", "E: Unable to locate package nosuch", null).contains("Unable to locate package nosuch"))
+        assertTrue(AptErrors.reason("", "W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease  Temporary failure resolving 'deb.debian.org'", null).contains("could not be reached"))
+        assertEquals("Sub-process /usr/bin/dpkg returned an error code (1)", AptErrors.reason("", "dpkg: error\nE: Sub-process /usr/bin/dpkg returned an error code (1)", null))
+        assertEquals("exec failed", AptErrors.reason("", "", "exec failed"))
+        assertTrue(AptErrors.needsUpdate("E: Unable to locate package x"))
+        assertTrue(AptErrors.needsUpdate("E: Failed to fetch http://deb.debian.org/x.deb  404  Not Found [IP: 1.2.3.4 80]"))
+        assertFalse(AptErrors.needsUpdate("0 upgraded, 1 newly installed"))
     }
 
     // ---------------------------------------------------------------- bundles
@@ -208,31 +252,34 @@ class PkgModelTest {
     // ------------------------------------------------------------------ facts
 
     @Test fun osReleaseAndFormats() {
-        val os = OsRelease.parse("NAME=\"Alpine Linux\"\nVERSION_ID=3.24.2\n# c\nPRETTY_NAME=\"Alpine Linux v3.24\"\n")
-        assertEquals("Alpine Linux v3.24", os["PRETTY_NAME"]); assertEquals("3.24.2", os["VERSION_ID"])
+        val os = OsRelease.parse("PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\n# c\n")
+        assertEquals("Debian GNU/Linux 13 (trixie)", os["PRETTY_NAME"]); assertEquals("13", os["VERSION_ID"])
         assertEquals("512 B", Fmt.bytes(512)); assertEquals("2 KB", Fmt.bytes(2048)); assertEquals("1.5 MB", Fmt.bytes(1_572_864)); assertEquals("2.00 GB", Fmt.bytes(2_147_483_648))
         assertEquals("+1.0 MB", Fmt.signed(1_048_576)); assertEquals("-1.0 MB", Fmt.signed(-1_048_576))
     }
 
     @Test fun repositories() {
-        val r = Repos.parse("https://dl-cdn.alpinelinux.org/alpine/v3.24/main\n#https://dl-cdn.alpinelinux.org/alpine/v3.24/testing\nhttp://plain.example/x\n\ngarbage")
-        assertEquals(3, r.size)
-        assertTrue(r[0].enabled && r[0].secure); assertFalse(r[1].enabled); assertFalse(r[2].secure)
-        assertEquals("dl-cdn.alpinelinux.org/alpine/v3.24/main", r[0].label)
+        // the image's real debian.sources, plus a disabled stanza and a one-line list
+        val sources = "Types: deb\nURIs: http://deb.debian.org/debian\nSuites: trixie trixie-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.pgp\n\nTypes: deb\nURIs: http://deb.debian.org/debian-security\nSuites: trixie-security\nComponents: main\n\nTypes: deb\nEnabled: no\nURIs: https://example.org/apt\nSuites: stable\n"
+        val r = Repos.parse(sources, "deb [signed-by=/k.gpg] https://pkgs.example/deb stable main\n# deb http://old.example/deb bookworm main\ngarbage")
+        assertEquals(6, r.size)
+        assertEquals("deb.debian.org/debian trixie", r[0].label)
+        assertTrue(r[0].enabled && !r[0].secure)
+        assertFalse(r[3].enabled); assertTrue(r[3].secure)
+        assertEquals("pkgs.example/deb stable", r[4].label); assertTrue(r[4].enabled)
+        assertFalse(r[5].enabled)
     }
 
-    // -------------------------------------------- the real database on this device
+    // -------------------------------------------- the real database on a Debian system
 
     @Test fun realInstalledDatabaseParsesWhenPresent() {
-        val f = File("/lib/apk/db/installed")
+        val f = File("/var/lib/dpkg/status")
         assumeTrue(f.isFile)
-        val pkgs = ApkDb.parse(f.readText())
+        val pkgs = DpkgStatus.parse(f.readText())
         assertTrue("many packages: ${pkgs.size}", pkgs.size > 50)
-        assertNotNull(pkgs.firstOrNull { it.name == "busybox" })
+        assertNotNull(pkgs.firstOrNull { it.name == "dpkg" })
         assertTrue(pkgs.all { it.version.isNotEmpty() })
         val rev = Deps.requiredBy(pkgs)
-        assertTrue("musl is needed by many", (rev["musl"]?.size ?: 0) > 20)
-        val world = File("/etc/apk/world")
-        if (world.isFile) assertTrue(World.parse(world.readText()).isNotEmpty())
+        assertTrue("libc6 is needed by many", (rev["libc6"]?.size ?: 0) > 20)
     }
 }

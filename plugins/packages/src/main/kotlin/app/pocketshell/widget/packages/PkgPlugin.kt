@@ -8,7 +8,7 @@ import app.pocketshell.widget.plugin.WidgetPlugin
 class PackagesPlugin : WidgetPlugin {
 
     override val pluginId: String = "packages"
-    override val pluginVersion: String = "1.0.0"
+    override val pluginVersion: String = "2.0.0"
 
     override fun create(androidContext: Context): HomeApplication = PkgApp
 }
