@@ -19,13 +19,13 @@
       "name": "Network & Home Lab",
       "summary": "Find devices on your Wi-Fi, watch your servers, DNS / ping / traceroute / port tools, SSH hosts, keys, tunnels and folder sharing",
       "author": "PocketShell",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "minAppVersion": "0.13.0",
       "file": "widgets/network.json",
       "plugin": {
         "className": "app.pocketshell.widget.network.NetworkPlugin",
-        "dex": "releases/network/2.0.0/plugin.jar",
-        "sha256": "0db070e0974fa1930ffa82451ab5b5ae53def136c4d55559e0683358f29dab4d"
+        "dex": "releases/network/2.0.1/plugin.jar",
+        "sha256": "412c60ffd62393ff36eca0ca9c32301201cf27002b922934a734e2e62a1f186f"
       }
     },
     {
@@ -33,13 +33,13 @@
       "name": "GUI Apps",
       "summary": "Discover, install and launch desktop apps for the Linux guest - musl (Alpine) and glibc (AppImage), arm64",
       "author": "PocketShell",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "minAppVersion": "0.13.0",
       "file": "releases/guiapps/1.0.0/catalog-entry-unused.json",
       "plugin": {
         "className": "app.pocketshell.widget.guiapps.GuiAppsPlugin",
-        "dex": "releases/guiapps/1.0.0/plugin.jar",
-        "sha256": "f02fe7a419e49c8b89e219d51d768843b6fef2d43e0339bcea5c7d7dd0a7b581"
+        "dex": "releases/guiapps/2.0.0/plugin.jar",
+        "sha256": "ff4b92b319c9956c3ecc2c39428936ffe8b8da6259da28f55fd49bfec968f365"
       }
     },
     {
@@ -47,13 +47,13 @@
       "name": "Server Hub",
       "summary": "Start and manage web servers, local APIs and self-hosted services - ports, logs, health, restart controls and links",
       "author": "PocketShell",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "minAppVersion": "0.13.0",
       "file": "releases/serverhub/1.0.0/catalog-entry-unused.json",
       "plugin": {
         "className": "app.pocketshell.widget.serverhub.ServerHubPlugin",
-        "dex": "releases/serverhub/1.0.0/plugin.jar",
-        "sha256": "43f151bd284eb1a386c7773099c7c4fbad098775b1781a5206bbbc02071ae3db"
+        "dex": "releases/serverhub/1.0.1/plugin.jar",
+        "sha256": "b7426fbd0f976f6b729877b52af8f9f03e905e1578ccdbdc704a16e79337c6cb"
       }
     },
     {
@@ -61,13 +61,13 @@
       "name": "Packages",
       "summary": "Add, update and remove Linux packages and CLI tool bundles; repositories, cache and repair",
       "author": "PocketShell",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "minAppVersion": "0.13.0",
       "file": "releases/packages/1.0.0/catalog-entry-unused.json",
       "plugin": {
         "className": "app.pocketshell.widget.packages.PackagesPlugin",
-        "dex": "releases/packages/1.0.0/plugin.jar",
-        "sha256": "6185a23048d4fd81d58aa0b27b9d26b5eb0d7886e94ca313db8ce979dc21d204"
+        "dex": "releases/packages/2.0.0/plugin.jar",
+        "sha256": "cd8bdc6630cfa72a8a2f822ce711c97e196d3f1d7b74fe46528c4f6f425eb932"
       }
     },
     {
@@ -93,13 +93,13 @@
       "name": "Git",
       "summary": "Repositories in the Linux guest — changes, history, branches, files, remotes",
       "author": "PocketShell core",
-      "version": "3.4.2",
+      "version": "3.4.3",
       "minAppVersion": "0.13.0",
       "file": "widgets/git.json",
       "plugin": {
         "className": "app.pocketshell.widget.git.GitPlugin",
-        "dex": "releases/git/3.4.2/plugin.jar",
-        "sha256": "b763a793773719fc1aa81c5ec477292efecd3aa73d1db48a73b240f4880402ba"
+        "dex": "releases/git/3.4.3/plugin.jar",
+        "sha256": "a7cdecf1dd6fade78645067f49022203962dbb2df6bfa23b1c02c351737791a4"
       }
     },
     {
@@ -107,13 +107,13 @@
       "name": "Backup & Restore",
       "summary": "Back up your Linux home, packages and settings to one portable (optionally encrypted) file - and restore it on a new phone",
       "author": "PocketShell core",
-      "version": "3.2.0",
+      "version": "4.0.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/sync.json",
       "plugin": {
         "className": "app.pocketshell.widget.sync.SyncPlugin",
-        "dex": "releases/sync/3.2.0/plugin.jar",
-        "sha256": "7527f6858e3d3697f5828b6d5f2504baa8350e13f681e6a36472ceb0f851cf0a"
+        "dex": "releases/sync/4.0.0/plugin.jar",
+        "sha256": "6e18747b99b4a278d768fec33c52e5a5d8b8c8a98346c254a138ad7db3f88b5a"
       }
     },
     {
