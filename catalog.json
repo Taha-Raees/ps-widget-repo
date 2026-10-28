@@ -31,7 +31,7 @@
     {
       "id": "guiapps",
       "name": "GUI Apps",
-      "summary": "Discover, install and launch desktop apps for the Linux guest - musl (Alpine) and glibc (AppImage), arm64",
+      "summary": "Discover, install and launch desktop apps for the Linux guest - musl and glibc (AppImage), arm64",
       "author": "PocketShell",
       "version": "2.0.0",
       "minAppVersion": "0.13.0",
@@ -93,13 +93,13 @@
       "name": "Git",
       "summary": "Repositories in the Linux guest — changes, history, branches, files, remotes",
       "author": "PocketShell core",
-      "version": "3.4.3",
+      "version": "3.4.4",
       "minAppVersion": "0.13.0",
       "file": "widgets/git.json",
       "plugin": {
         "className": "app.pocketshell.widget.git.GitPlugin",
-        "dex": "releases/git/3.4.3/plugin.jar",
-        "sha256": "a7cdecf1dd6fade78645067f49022203962dbb2df6bfa23b1c02c351737791a4"
+        "dex": "releases/git/3.4.4/plugin.jar",
+        "sha256": "c44fb15671ebb3db7cdf17b4ade51dede97dc869fdd5e8844d0aaa89aa9e8d72"
       }
     },
     {
@@ -107,13 +107,13 @@
       "name": "Backup & Restore",
       "summary": "Back up your Linux home, packages and settings to one portable (optionally encrypted) file - and restore it on a new phone",
       "author": "PocketShell core",
-      "version": "4.0.0",
+      "version": "4.0.1",
       "minAppVersion": "0.13.0",
       "file": "widgets/sync.json",
       "plugin": {
         "className": "app.pocketshell.widget.sync.SyncPlugin",
-        "dex": "releases/sync/4.0.0/plugin.jar",
-        "sha256": "6e18747b99b4a278d768fec33c52e5a5d8b8c8a98346c254a138ad7db3f88b5a"
+        "dex": "releases/sync/4.0.1/plugin.jar",
+        "sha256": "291a82a11713b7aea5aa0c28559f80972fb3d2fd03a9516d7be3dfcca3779fc4"
       }
     },
     {

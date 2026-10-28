@@ -133,7 +133,7 @@ data class Template(
     val dir: String,
     val check: CheckKind,
     val path: String = "/",
-    /** The programs the command needs, and the Alpine packages that provide them. */
+    /** The programs the command needs, and the Debian packages that provide them. */
     val needs: List<String> = emptyList(),
     val packages: List<String> = emptyList(),
     val files: Map<String, String> = emptyMap(),

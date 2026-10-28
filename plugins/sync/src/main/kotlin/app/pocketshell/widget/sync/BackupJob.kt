@@ -145,7 +145,18 @@ op_backup() {
   { tar -c -f - -C "§{R:-/}" -X "§S/exclude.txt" -T "§S/include.eff" 2> "§S/tar.err"; echo "§?" > "§S/tar.exit"; } | §CZ > "§S/payload"
   CRC="§?"
   rm -rf "§META"
-  if [ "§(cat "§S/tar.exit" 2>/dev/null)" != 0 ]; then finish 4 "§(tail -n 1 "§S/tar.err" 2>/dev/null)"; fi
+  TX="§(cat "§S/tar.exit" 2>/dev/null)"
+  if [ "§TX" != 0 ]; then
+    # tar exits non-zero for ONE unreadable or vanished file and its last line is only
+    # "Exiting with failure status": so judge by the real error lines. A full disk or a
+    # broken pipe still fails; a file it could not read is skipped and reported.
+    grep -v -e 'Exiting with failure' -e 'file changed as we read' -e 'file removed before we read' -e 'socket ignored' "§S/tar.err" > "§S/tar.real" 2>/dev/null
+    FATAL="§(grep -i -m 1 -e 'No space left' -e 'Write error' -e 'Cannot write' -e 'Broken pipe' -e 'Disk quota' "§S/tar.real" 2>/dev/null)"
+    if [ -n "§FATAL" ] || [ "§CRC" != 0 ] || [ "§TX" -gt 2 ] 2>/dev/null; then
+      finish 4 "§{FATAL:-§(head -n 1 "§S/tar.real" 2>/dev/null)}"
+    fi
+    cat "§S/tar.real" >> "§S/skipped.txt" 2>/dev/null
+  fi
   if [ "§CRC" != 0 ]; then finish 5 "compression failed"; fi
   phase done
   finish 0

@@ -428,12 +428,16 @@ private fun NavItem(
             .clickable(role = Role.Tab, onClickLabel = "Show $label") { onClick() },
     ) {
         if (selected) {
-            Box(
-                Modifier
-                    .align(if (ruleOnTop) Alignment.TopCenter else Alignment.CenterStart)
-                    .then(if (ruleOnTop) Modifier.fillMaxWidth().height(2.dp) else Modifier.fillMaxHeight().width(3.dp))
-                    .background(HomeTokens.accent),
-            )
+            // matchParentSize: a bare fillMaxHeight() here sized the whole item to the rail's height,
+            // so on a wide screen the active tab swallowed every tab below it.
+            Box(Modifier.matchParentSize()) {
+                Box(
+                    Modifier
+                        .align(if (ruleOnTop) Alignment.TopCenter else Alignment.CenterStart)
+                        .then(if (ruleOnTop) Modifier.fillMaxWidth().height(2.dp) else Modifier.fillMaxHeight().width(3.dp))
+                        .background(HomeTokens.accent),
+                )
+            }
         }
         Column(
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),

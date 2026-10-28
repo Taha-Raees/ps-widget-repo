@@ -177,7 +177,9 @@ internal class GitProbe(
                     val parsed = parseProbeOutput(out.stdout)
                     when {
                         parsed == null -> ScanResult.Failed("unrecognized probe output")
-                        !parsed.complete -> ScanResult.Failed("probe output truncated")
+                        // A cut-off scan with NOTHING finished is a failure; with finished repos it is
+                        // shown, and only the block that was cut short carries "probe output truncated".
+                        !parsed.complete && parsed.repos.none { it.rc != null } -> ScanResult.Failed("probe output truncated")
                         else -> ScanResult.Done(toSnapshot(parsed))
                     }
                 }

@@ -329,6 +329,16 @@ class GitProbeTest {
     }
 
     @Test
+    fun `a cut-off scan keeps the repos that finished and flags only the cut one`() {
+        val out = "@@GIT:2.47.3\n@@REPO:/root/a\n## main\n@@RC:0\n@@LOG\n@@BRANCHES\n@@REMOTES\n@@REPO:/root/b\n"
+        val result = GitProbe(FakeExec { ExecResult(exitCode = 0, stdout = out, stderr = "") }).snapshot()
+        val repos = (result as ScanResult.Done).snapshot.repos
+        assertEquals(2, repos.size)
+        assertNull(repos[0].error)
+        assertEquals("probe output truncated", repos[1].error)
+    }
+
+    @Test
     fun `unrecognizable stdout is a failed probe`() {
         val probe = GitProbe(FakeExec { ExecResult(exitCode = 0, stdout = "bin/sh: syntax error\n", stderr = "") })
         assertTrue(probe.snapshot() is ScanResult.Failed)
