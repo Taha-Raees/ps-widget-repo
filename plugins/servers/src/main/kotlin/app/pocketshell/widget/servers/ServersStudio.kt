@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.MonitorHeart
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Refresh
@@ -60,6 +61,7 @@ import app.pocketshell.widget.probe.ServerInfo
  */
 internal enum class StudioTab(val label: String, val icon: ImageVector) {
     OVERVIEW("Overview", Icons.Outlined.Dashboard),
+    HEALTH("Health", Icons.Outlined.MonitorHeart),
     SERVERS("Servers", Icons.Outlined.Dns),
     BACKGROUND("Background", Icons.Outlined.Memory),
     SESSIONS("Sessions", Icons.Outlined.Terminal),
@@ -133,7 +135,14 @@ internal fun ServersStudio(
                             onTab = ::selectTab,
                             onOpenEntry = ::openEntry,
                         )
+                        HealthOverviewRow(state) { selectTab(StudioTab.HEALTH) }
                         CleanupOverviewRow(state) { selectTab(StudioTab.CLEANUP) }
+                        Spacer(Modifier.height(16.dp))
+                        StateFooter(state)
+                    }
+
+                    StudioTab.HEALTH -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                        HealthBody(state, actions, ::openEntry)
                         Spacer(Modifier.height(16.dp))
                         StateFooter(state)
                     }
@@ -300,6 +309,7 @@ private fun StudioTopBar(state: ServersState, servers: List<ServerInfo>, procs: 
             )
             val facts = listOfNotNull(
                 ProcPresentation.summary(up, bg, ses).takeIf { state.ui is ServersUi.Ready },
+                "${state.budget.count}/${ProcessBudgetFacts.LIMIT} procs".takeIf { state.procAtMs != 0L },
                 if (state.paused) "paused" else null,
             )
             if (facts.isNotEmpty()) MonoText(text = facts.joinToString(" · "), color = HomeTokens.textDim, fontSize = 11)
@@ -312,6 +322,29 @@ private fun StudioTopBar(state: ServersState, servers: List<ServerInfo>, procs: 
         StudioIconButton(Icons.Outlined.Refresh, "Refresh now", actions.onRefresh)
         StudioIconButton(Icons.Outlined.Terminal, "Open terminal", actions.onOpenTerminal)
     }
+}
+
+/** One line on the overview: is anything wrong, tap to open it. */
+@Composable
+private fun HealthOverviewRow(state: ServersState, onOpen: () -> Unit) {
+    SectionLabel("HEALTH", Modifier.padding(top = 16.dp, bottom = 4.dp))
+    Rule()
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Open health") { onOpen() }.padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        MonoText(
+            text = Health.overviewLine(state.budget, state.findings, state.cleanup),
+            color = when {
+                state.findings.any { it.severity >= Severity.WARNING } -> HomeTokens.danger
+                state.cleanup.watchHealth -> HomeTokens.accent
+                else -> HomeTokens.textDim
+            },
+            modifier = Modifier.weight(1f),
+        )
+        MonoText(text = "OPEN", color = HomeTokens.accent, fontSize = 11)
+    }
+    Rule()
 }
 
 /** One line on the overview: what the cleanup is doing, tap to open it. */

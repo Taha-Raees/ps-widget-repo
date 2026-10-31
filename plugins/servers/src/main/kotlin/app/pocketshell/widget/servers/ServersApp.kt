@@ -189,6 +189,19 @@ object ServersApp : HomeApplication() {
                     onDismiss = { state.dismissStop() },
                 )
             }
+            if (state.cleanNowPending) {
+                val ready = state.candidates.filter { it.due }
+                StopConfirmDialog(
+                    spec = ServersOps.ConfirmSpec(
+                        title = "Stop ${ready.size} idle programs?",
+                        body = ready.joinToString(", ") { it.entry.label } + ". Each is checked again and sent a polite stop (SIGTERM).",
+                        command = ready.joinToString(" ") { "kill -s TERM ${it.entry.pid}" },
+                        confirmLabel = "STOP ALL",
+                    ),
+                    onConfirm = { state.cleanNow() },
+                    onDismiss = { state.cleanNowPending = false },
+                )
+            }
             state.stopOutcome?.let { outcome ->
                 OutcomeBanner(outcome = outcome, onDismiss = { state.stopOutcome = null })
             }
@@ -220,8 +233,11 @@ object ServersApp : HomeApplication() {
     /** With nothing changing and the page hidden, the process scan still refreshes every N ticks (30 s). */
     const val PROC_SLOW_TICKS = 6
 
-    /** How often the cleanup monitor looks (only while a cleanup rule is on). */
+    /** How often the monitor looks when all is well. */
     const val MONITOR_MS = 60_000L
+
+    /** How often it looks while something is wrong: a crash loop or a process swarm moves in seconds. */
+    const val HEALTH_FAST_MS = 15_000L
 
     /** The monitor never stops anything on a process list older than this. */
     const val MONITOR_MAX_STALE_MS = 90_000L
@@ -351,6 +367,14 @@ internal class ServersState(private val appContext: Context) {
     /** What the monitor did, newest first. Session-only by design. */
     var cleanupLog by mutableStateOf<List<CleanupLogEntry>>(emptyList())
 
+    // ---- HEALTH: see ServersHealth.kt.
+    private val healthWatch = HealthWatch()
+    var budget by mutableStateOf(ProcessBudgetFacts(0))
+    var groups by mutableStateOf<List<ProcGroup>>(emptyList())
+    var findings by mutableStateOf<List<Finding>>(emptyList())
+    var freedBytes by mutableStateOf(0L)
+    var cleanNowPending by mutableStateOf(false)
+
     init {
         cleanupScope.launch {
             val text = withContext(Dispatchers.IO) { try { settingsFile?.takeIf { it.isFile }?.readText() } catch (_: Exception) { null } }
@@ -365,13 +389,49 @@ internal class ServersState(private val appContext: Context) {
         cleanup = next
         cleanupScope.launch { saveCleanup(next) }
         syncMonitor()
-        refreshCandidates(System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        refreshCandidates(now)
+        refreshFindings(now)
     }
 
     /** "Never touch this program": the family of [entry] joins the keep list. */
     fun keep(entry: ProcEntry) = updateCleanup { it.copy(keep = it.keep + Cleanup.family(entry.label)) }
 
     fun unkeep(name: String) = updateCleanup { it.copy(keep = it.keep - name) }
+
+    /** Everything ready to stop, on the user's word. The same guards as AUTO; only the rule's mode and limit do not apply. */
+    fun cleanNow() {
+        cleanNowPending = false
+        cleanupScope.launch {
+            // Refresh the listeners first, as the monitor does: a new server must never look like an idle program.
+            scan()
+            val ready = candidates.filter { it.due }.map { it.copy(mode = CleanupMode.AUTO) }
+            val now = System.currentTimeMillis()
+            recordSweep(ready, CleanupRunner.sweep(ready, signaller, ledger, now, limit = ready.size))
+            scanProcesses()
+        }
+    }
+
+    /** The gentle action. Nothing stops; the system simply gives other programs the phone first. */
+    fun setPriority(group: ProcGroup, low: Boolean) {
+        cleanupScope.launch {
+            val entry = withContext(Dispatchers.IO) {
+                ProcPriority.apply(group, if (low) ProcPriority.BACKGROUND_NICE else ProcPriority.NORMAL_NICE, AndroidPrioritySetter) { ProcIdentityCheck.read(it) }
+            }
+            cleanupLog = CleanupRunner.append(cleanupLog, listOf(entry))
+            scanProcesses()
+        }
+    }
+
+    fun quiet(family: String) = updateCleanup { it.copy(quiet = it.quiet + family) }
+
+    fun unquiet(family: String) = updateCleanup { it.copy(quiet = it.quiet - family) }
+
+    private fun recordSweep(attempted: List<CleanupCandidate>, log: List<CleanupLogEntry>) {
+        if (log.isEmpty()) return
+        cleanupLog = CleanupRunner.append(cleanupLog, log)
+        freedBytes += attempted.filter { c -> log.any { it.ok && it.text.startsWith("Stopped ${c.entry.label} ") } }.sumOf { it.footprintBytes }
+    }
 
     private fun saveCleanup(s: CleanupSettings) {
         val f = settingsFile ?: return
@@ -389,9 +449,13 @@ internal class ServersState(private val appContext: Context) {
         candidates = Cleanup.candidates(procView, tracker, ledger, cleanup, nowMs, showFraction = 0.25)
     }
 
-    /** The monitor exists exactly while a rule is on. */
+    private fun refreshFindings(nowMs: Long) {
+        findings = Health.findings(procView, groups, budget, healthWatch, cleanup, nowMs)
+    }
+
+    /** The monitor exists exactly while there is something for it to do. */
     private fun syncMonitor() = synchronized(monitorLock) {
-        if (cleanup.watching) {
+        if (cleanup.monitorNeeded) {
             if (monitor?.isActive != true) monitor = cleanupScope.launch { monitorLoop() }
         } else {
             monitor?.cancel()
@@ -400,20 +464,35 @@ internal class ServersState(private val appContext: Context) {
     }
 
     private suspend fun monitorLoop() {
+        var lastSweepAt = 0L
         while (currentCoroutineContext().isActive) {
-            delay(ServersApp.MONITOR_MS)
+            val wait = Health.nextLookMs(budget, findings)
+            delay(wait)
             if (paused) continue // the user paused the monitor: nothing is stopped behind their back
             var now = System.currentTimeMillis()
-            if (now - procAtMs > ServersApp.MONITOR_MS - 5_000) scanProcesses()
-            if (Cleanup.dueForAuto(candidates).isEmpty()) continue
+            if (now - procAtMs > wait - 5_000) scanProcesses()
+            // Stops stay once a minute, however fast the health look is running.
+            if (now - lastSweepAt < ServersApp.MONITOR_MS - 5_000) continue
+            lastSweepAt = now
+            val calm = Health.autoCalm(findings, cleanup)
+            for (group in calm) {
+                val entry = withContext(Dispatchers.IO) { ProcPriority.apply(group, ProcPriority.BACKGROUND_NICE, AndroidPrioritySetter) { ProcIdentityCheck.read(it) } }
+                cleanupLog = CleanupRunner.append(cleanupLog, listOf(entry))
+            }
+            val budgetPick = Cleanup.budgetPick(Cleanup.candidates(procView, tracker, ledger, cleanup, now), cleanup, budget)
+            val memoryOk = Cleanup.memoryAllows(cleanup, system?.mem)
+            if (budgetPick.isEmpty() && (!memoryOk || Cleanup.dueForAuto(candidates, cleanup.perSweep).isEmpty())) continue
             // Something is about to be stopped: refresh the LISTENERS first (the quiet passes do not), so a server that
             // started since the last full scan can never look like an idle program.
             scan()
             now = System.currentTimeMillis()
             if (now - procAtMs > ServersApp.MONITOR_MAX_STALE_MS) continue
-            val log = CleanupRunner.sweep(candidates, signaller, ledger, now)
+            // The rescan may have changed the picture: choose again from the fresh list.
+            val freshBudget = Cleanup.budgetPick(Cleanup.candidates(procView, tracker, ledger, cleanup, now), cleanup, budget)
+            val targets = freshBudget.ifEmpty { if (memoryOk) candidates else emptyList() }
+            val log = CleanupRunner.sweep(targets, signaller, ledger, now, cleanup.perSweep)
             if (log.isNotEmpty()) {
-                cleanupLog = CleanupRunner.append(cleanupLog, log)
+                recordSweep(targets, log)
                 refreshCandidates(now)
             }
         }
@@ -471,6 +550,10 @@ internal class ServersState(private val appContext: Context) {
         // Every process pass - the page's own ticks and the monitor's - feeds the idle tracker.
         tracker.observe(procView, snap.atMs)
         refreshCandidates(snap.atMs)
+        budget = ProcessBudgetFacts(snap.forkedCount)
+        groups = ProcGroups.build(procView)
+        healthWatch.observe(procView, groups, cleanup, snap.atMs)
+        refreshFindings(snap.atMs)
         // A selection whose process vanished degrades to the list — never a
         // stale detail page for a dead pid.
         selectedPid?.let { pid -> if (procView.byPid[pid] == null) selectedPid = null }

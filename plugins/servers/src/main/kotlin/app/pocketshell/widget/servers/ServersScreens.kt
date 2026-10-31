@@ -106,7 +106,7 @@ internal fun ServersScreens(
                     onOpenProcess = { state.selectedPid = it.pid },
                     onOpenLinuxShell = actions.onOpenLinuxShell,
                     onOpenDiagnostics = actions.onOpenDiagnostics,
-                    cleanupLine = CleanupText.cardLine(state.candidates),
+                    cleanupLine = Health.cardLine(state.findings) ?: CleanupText.cardLine(state.candidates),
                 )
             }
         }

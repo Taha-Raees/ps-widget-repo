@@ -31,23 +31,68 @@ internal enum class CleanupMode(val label: String) {
 internal enum class CleanupRule(val title: String, val blurb: String) {
     BUILDS("Build daemons", "Gradle, Kotlin and Maven daemons left running after a build. They start again by themselves next time."),
     HEAVY("Heavy and idle", "Programs running without a terminal that use a lot of memory and have done nothing for a long time."),
+    CUSTOM("Your rule", "A program you named."),
 }
 
 internal data class RuleSettings(val mode: CleanupMode, val idleMinutes: Int, val minMemoryMb: Int)
+
+/** "Stop this program when it has been idle": every guard still applies, only the program is the user's choice. */
+internal data class CustomRule(val name: String, val settings: RuleSettings)
 
 internal data class CleanupSettings(
     val builds: RuleSettings = DEFAULT_BUILDS,
     val heavy: RuleSettings = DEFAULT_HEAVY,
     /** Program families the user said never to touch (lower-case, version stripped). */
     val keep: Set<String> = emptySet(),
+    val custom: List<CustomRule> = emptyList(),
+    /** Above this many processes, idle candidates may go early. OFF until asked for. */
+    val budgetMode: CleanupMode = CleanupMode.OFF,
+    val budgetAt: Int = 28,
+    /** At most this many stops per check. */
+    val perSweep: Int = Cleanup.MAX_PER_SWEEP,
+    /** AUTO waits until the device's available memory is under this percentage; 0 = always. */
+    val lowMemoryPercent: Int = 0,
+    val watchHealth: Boolean = true,
+    val swarmAt: Int = 12,
+    val cpuAtPercent: Int = 80,
+    val cpuMinutes: Int = 5,
+    val hogMb: Int = 2000,
+    /** Lower the priority of a CPU runaway without asking. */
+    val autoCalm: Boolean = false,
+    /** Programs whose health findings the user does not want to see. */
+    val quiet: Set<String> = emptySet(),
 ) {
-    fun rule(rule: CleanupRule): RuleSettings = if (rule == CleanupRule.BUILDS) builds else heavy
+    fun rule(rule: CleanupRule): RuleSettings = when (rule) {
+        CleanupRule.BUILDS -> builds
+        CleanupRule.HEAVY -> heavy
+        CleanupRule.CUSTOM -> RuleSettings(CleanupMode.OFF, 60, 0)
+    }
 
-    /** Any rule that needs us to watch. */
-    val watching: Boolean get() = builds.mode != CleanupMode.OFF || heavy.mode != CleanupMode.OFF
+    fun customFor(family: String, program: String): CustomRule? = custom.firstOrNull { it.name == family || it.name == program }
 
-    fun with(rule: CleanupRule, s: RuleSettings): CleanupSettings =
-        if (rule == CleanupRule.BUILDS) copy(builds = CleanupSettingsCodec.sanitize(rule, s)) else copy(heavy = CleanupSettingsCodec.sanitize(rule, s))
+    /** Any rule that can stop something needs us to watch. */
+    val watching: Boolean
+        get() = builds.mode != CleanupMode.OFF || heavy.mode != CleanupMode.OFF || budgetMode != CleanupMode.OFF ||
+            custom.any { it.settings.mode != CleanupMode.OFF }
+
+    /** The background look exists while there is anything for it to do. */
+    val monitorNeeded: Boolean get() = watching || watchHealth
+
+    fun with(rule: CleanupRule, s: RuleSettings): CleanupSettings = when (rule) {
+        CleanupRule.BUILDS -> copy(builds = CleanupSettingsCodec.sanitize(rule, s))
+        CleanupRule.HEAVY -> copy(heavy = CleanupSettingsCodec.sanitize(rule, s))
+        CleanupRule.CUSTOM -> this
+    }
+
+    fun withCustom(name: String, s: RuleSettings): CleanupSettings =
+        copy(custom = custom.map { if (it.name == name) it.copy(settings = CleanupSettingsCodec.sanitize(CleanupRule.CUSTOM, s)) else it })
+
+    /** A program name that is not valid, already there, or one too many is simply not added. */
+    fun addCustom(name: String): CleanupSettings {
+        val clean = name.trim().lowercase()
+        if (!CleanupSettingsCodec.validKeep(clean) || custom.any { it.name == clean } || custom.size >= CleanupSettingsCodec.MAX_CUSTOM) return this
+        return copy(custom = custom + CustomRule(clean, CleanupSettingsCodec.DEFAULT_CUSTOM))
+    }
 
     companion object {
         val DEFAULT_BUILDS = RuleSettings(CleanupMode.OFF, idleMinutes = 30, minMemoryMb = 0)
@@ -58,18 +103,45 @@ internal data class CleanupSettings(
 /** The choices the UI offers - and the only values accepted from disk, so a hand-edited file cannot make a rule reckless. */
 internal object CleanupSettingsCodec {
 
-    val BUILD_IDLE_CHOICES = listOf(15, 30, 60, 120, 240)
-    val BUILD_MEM_CHOICES = listOf(0, 200, 500, 1000)
+    val BUILD_IDLE_CHOICES = listOf(5, 15, 30, 60, 120, 240)
+    val BUILD_MEM_CHOICES = listOf(0, 200, 500, 1000, 2000)
 
     /** The heavy rule is stricter by construction: a long idle window and a real memory floor. */
-    val HEAVY_IDLE_CHOICES = listOf(60, 120, 240)
-    val HEAVY_MEM_CHOICES = listOf(500, 1000, 2000)
+    val HEAVY_IDLE_CHOICES = listOf(60, 120, 240, 480)
+    val HEAVY_MEM_CHOICES = listOf(500, 1000, 2000, 4000)
 
-    fun idleChoices(rule: CleanupRule) = if (rule == CleanupRule.BUILDS) BUILD_IDLE_CHOICES else HEAVY_IDLE_CHOICES
-    fun memChoices(rule: CleanupRule) = if (rule == CleanupRule.BUILDS) BUILD_MEM_CHOICES else HEAVY_MEM_CHOICES
+    /** The user named the program, so short windows and no floor are their call. */
+    val CUSTOM_IDLE_CHOICES = listOf(5, 15, 30, 60, 120, 240, 480)
+    val CUSTOM_MEM_CHOICES = listOf(0, 100, 200, 500, 1000, 2000)
+    val DEFAULT_CUSTOM = RuleSettings(CleanupMode.ASK, idleMinutes = 30, minMemoryMb = 0)
+    const val MAX_CUSTOM = 20
+
+    val BUDGET_AT_CHOICES = listOf(20, 24, 26, 28, 30)
+    val PER_SWEEP_CHOICES = listOf(1, 3, 5)
+    val LOW_MEMORY_CHOICES = listOf(0, 30, 20, 10)
+    val SWARM_CHOICES = listOf(8, 12, 16, 24)
+    val CPU_AT_CHOICES = listOf(50, 80, 150, 300)
+    val CPU_MINUTES_CHOICES = listOf(2, 5, 10, 30)
+    val HOG_CHOICES = listOf(1000, 2000, 4000, 8000)
+
+    fun idleChoices(rule: CleanupRule) = when (rule) {
+        CleanupRule.BUILDS -> BUILD_IDLE_CHOICES
+        CleanupRule.HEAVY -> HEAVY_IDLE_CHOICES
+        CleanupRule.CUSTOM -> CUSTOM_IDLE_CHOICES
+    }
+
+    fun memChoices(rule: CleanupRule) = when (rule) {
+        CleanupRule.BUILDS -> BUILD_MEM_CHOICES
+        CleanupRule.HEAVY -> HEAVY_MEM_CHOICES
+        CleanupRule.CUSTOM -> CUSTOM_MEM_CHOICES
+    }
 
     fun sanitize(rule: CleanupRule, s: RuleSettings): RuleSettings {
-        val def = if (rule == CleanupRule.BUILDS) CleanupSettings.DEFAULT_BUILDS else CleanupSettings.DEFAULT_HEAVY
+        val def = when (rule) {
+            CleanupRule.BUILDS -> CleanupSettings.DEFAULT_BUILDS
+            CleanupRule.HEAVY -> CleanupSettings.DEFAULT_HEAVY
+            CleanupRule.CUSTOM -> DEFAULT_CUSTOM
+        }
         return RuleSettings(
             mode = s.mode,
             idleMinutes = s.idleMinutes.takeIf { it in idleChoices(rule) } ?: def.idleMinutes,
@@ -86,11 +158,20 @@ internal object CleanupSettingsCodec {
         appendLine("builds=${s.builds.mode.name},${s.builds.idleMinutes},${s.builds.minMemoryMb}")
         appendLine("heavy=${s.heavy.mode.name},${s.heavy.idleMinutes},${s.heavy.minMemoryMb}")
         s.keep.filter(::validKeep).sorted().take(MAX_KEEP).forEach { appendLine("keep=$it") }
+        s.custom.take(MAX_CUSTOM).forEach { appendLine("custom=${it.settings.mode.name},${it.settings.idleMinutes},${it.settings.minMemoryMb},${it.name}") }
+        appendLine("budget=${s.budgetMode.name},${s.budgetAt}")
+        appendLine("perSweep=${s.perSweep}")
+        appendLine("lowMemory=${s.lowMemoryPercent}")
+        appendLine("health=${if (s.watchHealth) 1 else 0},${s.swarmAt},${s.cpuAtPercent},${s.cpuMinutes},${s.hogMb},${if (s.autoCalm) 1 else 0}")
+        s.quiet.filter(::validKeep).sorted().take(MAX_KEEP).forEach { appendLine("quiet=$it") }
     }
 
     fun decode(text: String?): CleanupSettings {
         var out = CleanupSettings()
         val keep = LinkedHashSet<String>()
+        val quiet = LinkedHashSet<String>()
+        val custom = ArrayList<CustomRule>()
+        fun pick(value: Int?, choices: List<Int>, fallback: Int) = value?.takeIf { it in choices } ?: fallback
         for (line in text.orEmpty().lines()) {
             val key = line.substringBefore('=', "").trim()
             val value = line.substringAfter('=', "").trim()
@@ -103,9 +184,36 @@ internal object CleanupSettingsCodec {
                     out = if (rule == CleanupRule.BUILDS) out.copy(builds = s) else out.copy(heavy = s)
                 }
                 "keep" -> if (validKeep(value) && keep.size < MAX_KEEP) keep += value
+                "quiet" -> if (validKeep(value) && quiet.size < MAX_KEEP) quiet += value
+                "custom" -> {
+                    val p = value.split(',', limit = 4)
+                    val mode = CleanupMode.entries.firstOrNull { it.name == p.getOrNull(0) } ?: continue
+                    val name = p.getOrNull(3)?.trim().orEmpty()
+                    if (validKeep(name) && custom.size < MAX_CUSTOM && custom.none { it.name == name }) {
+                        custom += CustomRule(name, sanitize(CleanupRule.CUSTOM, RuleSettings(mode, p.getOrNull(1)?.toIntOrNull() ?: -1, p.getOrNull(2)?.toIntOrNull() ?: -1)))
+                    }
+                }
+                "budget" -> {
+                    val p = value.split(',')
+                    val mode = CleanupMode.entries.firstOrNull { it.name == p.getOrNull(0) } ?: continue
+                    out = out.copy(budgetMode = mode, budgetAt = pick(p.getOrNull(1)?.toIntOrNull(), BUDGET_AT_CHOICES, out.budgetAt))
+                }
+                "perSweep" -> out = out.copy(perSweep = pick(value.toIntOrNull(), PER_SWEEP_CHOICES, out.perSweep))
+                "lowMemory" -> out = out.copy(lowMemoryPercent = pick(value.toIntOrNull(), LOW_MEMORY_CHOICES, out.lowMemoryPercent))
+                "health" -> {
+                    val p = value.split(',').map { it.toIntOrNull() }
+                    out = out.copy(
+                        watchHealth = p.getOrNull(0) != 0,
+                        swarmAt = pick(p.getOrNull(1), SWARM_CHOICES, out.swarmAt),
+                        cpuAtPercent = pick(p.getOrNull(2), CPU_AT_CHOICES, out.cpuAtPercent),
+                        cpuMinutes = pick(p.getOrNull(3), CPU_MINUTES_CHOICES, out.cpuMinutes),
+                        hogMb = pick(p.getOrNull(4), HOG_CHOICES, out.hogMb),
+                        autoCalm = p.getOrNull(5) == 1,
+                    )
+                }
             }
         }
-        return out.copy(keep = keep)
+        return out.copy(keep = keep, quiet = quiet, custom = custom)
     }
 }
 
@@ -196,6 +304,16 @@ internal class CleanupLedger {
     private data class Kill(val key: String, val family: String, val atMs: Long)
 
     private val kills = ArrayList<Kill>()
+    private val refused = HashSet<String>()
+
+    /** AUTO looked at this process and a sweep-time guard said no (a socket, a window). It is not asked again every minute. */
+    @Synchronized
+    fun recordRefusal(e: ProcEntry) {
+        refused += IdleTracker.key(e)
+    }
+
+    @Synchronized
+    fun wasRefused(e: ProcEntry): Boolean = IdleTracker.key(e) in refused
 
     @Synchronized
     fun recordKill(e: ProcEntry, nowMs: Long) {
@@ -240,9 +358,10 @@ internal object Cleanup {
     val PROTECTED_PROGRAMS: Set<String> = setOf(
         "ssh", "sshd", "ssh-agent", "autossh", "scp", "sftp", "ssh-keygen",
         "rsync", "rclone", "tar", "zstd", "gzip", "bzip2", "xz", "zip", "unzip", "7z",
-        "apk", "git", "git-remote-https", "curl", "wget", "aria2c", "yt-dlp", "ffmpeg", "dd", "cp", "mv",
+        "apk", "apt", "apt-get", "aptitude", "dpkg", "dpkg-deb", "unattended-upgrade", "git", "git-remote-https", "curl", "wget", "aria2c", "yt-dlp", "ffmpeg", "dd", "cp", "mv",
         "tmux", "screen", "zellij", "dtach", "abduco",
         "gpg", "gpg-agent", "dbus-daemon", "crond",
+        "weston", "xwayland", "ps-capture",
     )
 
     private val VERSION_SUFFIX = Regex("""\s+\d+(\.\d+)+$""")
@@ -272,7 +391,11 @@ internal object Cleanup {
      * so the tests can pin them one by one.
      */
     fun veto(e: ProcEntry, view: ProcView, rule: CleanupRule, s: CleanupSettings): String? {
-        val r = s.rule(rule)
+        val r = if (rule == CleanupRule.CUSTOM) {
+            s.customFor(family(e.label), programName(e))?.settings ?: return "no rule of yours names it"
+        } else {
+            s.rule(rule)
+        }
         if (e.pid <= 1) return "not a guest process"
         if (e.survival == Survival.ATTACHED) return "bound to a terminal"
         if (!e.reparented) return "started from a process that is still running"
@@ -283,6 +406,7 @@ internal object Cleanup {
         when (rule) {
             CleanupRule.BUILDS -> if (!isBuildDaemon(e)) return "not a build daemon"
             CleanupRule.HEAVY -> if (e.kind != ProcKind.OTHER) return "not a plain program"
+            CleanupRule.CUSTOM -> Unit
         }
         val prog = programName(e)
         if (prog in PROTECTED_PROGRAMS || e.rec.comm.lowercase() in PROTECTED_PROGRAMS) return "protected program ($prog)"
@@ -302,11 +426,12 @@ internal object Cleanup {
         showFraction: Double = 0.0,
     ): List<CleanupCandidate> {
         val out = ArrayList<CleanupCandidate>()
-        for (rule in CleanupRule.entries) {
-            val r = settings.rule(rule)
-            val threshold = r.idleMinutes * 60_000L
+        // The rule the user wrote for a program outranks the general ones: one row per process, first match wins.
+        for (rule in listOf(CleanupRule.CUSTOM, CleanupRule.BUILDS, CleanupRule.HEAVY)) {
             for (e in view.all) {
                 if (veto(e, view, rule, settings) != null) continue
+                val r = if (rule == CleanupRule.CUSTOM) settings.customFor(family(e.label), programName(e))!!.settings else settings.rule(rule)
+                val threshold = r.idleMinutes * 60_000L
                 val idle = tracker.idleForMs(e, nowMs) ?: continue
                 if (idle < (threshold * showFraction).toLong()) continue
                 if (ledger.recentlySignalled(e, nowMs)) continue
@@ -316,7 +441,7 @@ internal object Cleanup {
                     mode = r.mode,
                     idleForMs = idle,
                     thresholdMs = threshold,
-                    autoAllowed = !ledger.stubborn(e, nowMs) && !ledger.autoPaused(family(e.label), nowMs),
+                    autoAllowed = !ledger.stubborn(e, nowMs) && !ledger.autoPaused(family(e.label), nowMs) && !ledger.wasRefused(e),
                 )
             }
         }
@@ -325,10 +450,32 @@ internal object Cleanup {
     }
 
     /** What the monitor may stop right now: AUTO rules, due, allowed, at most [MAX_PER_SWEEP]. */
-    fun dueForAuto(candidates: List<CleanupCandidate>): List<CleanupCandidate> =
-        candidates.filter { it.mode == CleanupMode.AUTO && it.due && it.autoAllowed }.take(MAX_PER_SWEEP)
+    fun dueForAuto(candidates: List<CleanupCandidate>, limit: Int = MAX_PER_SWEEP): List<CleanupCandidate> =
+        candidates.filter { it.mode == CleanupMode.AUTO && it.due && it.autoAllowed }.take(limit)
 
     const val MAX_PER_SWEEP = 3
+
+    /** The budget guard never stops something that has been working in the last few minutes. */
+    const val BUDGET_MIN_IDLE_MS = 5 * 60_000L
+
+    /** May AUTO act now? With a memory condition set, unknown memory means no. */
+    fun memoryAllows(s: CleanupSettings, mem: MemInfo?): Boolean {
+        if (s.lowMemoryPercent <= 0) return true
+        if (mem == null || mem.totalKb <= 0) return false
+        return mem.availableKb * 100 < mem.totalKb * s.lowMemoryPercent
+    }
+
+    /**
+     * Over the budget, the safest thing that frees most: candidates the rules' guards already accept, idle for a few
+     * minutes, whichever window their own rule has. One at a time, so the count is looked at again before the next.
+     */
+    fun budgetPick(candidates: List<CleanupCandidate>, s: CleanupSettings, budget: ProcessBudgetFacts): List<CleanupCandidate> {
+        if (s.budgetMode != CleanupMode.AUTO || budget.count < s.budgetAt) return emptyList()
+        return candidates.filter { it.idleForMs >= BUDGET_MIN_IDLE_MS && it.autoAllowed }
+            .maxByOrNull { it.footprintBytes }
+            ?.let { listOf(it.copy(mode = CleanupMode.AUTO, thresholdMs = 0)) }
+            .orEmpty()
+    }
 
     /** "1 h 5 min", "12 min", "45 s". */
     fun duration(ms: Long): String {
@@ -353,6 +500,9 @@ internal interface CleanupSignaller {
 
     /** How many network sockets the process holds open; null when that cannot be read (treated as "unknown" = hands off). */
     fun openSockets(pid: Int): Int?
+
+    /** Was it started on the Linux desktop? A browser with one idle window is still something you are using. */
+    fun isDesktopApp(pid: Int): Boolean = false
 }
 
 internal class AndroidCleanupSignaller : CleanupSignaller {
@@ -364,6 +514,13 @@ internal class AndroidCleanupSignaller : CleanupSignaller {
         }
     } catch (_: Exception) {
         null
+    }
+
+    // /proc/<pid>/environ is NUL-separated. Unreadable means unknown, which is hands off.
+    override fun isDesktopApp(pid: Int): Boolean = try {
+        String(java.io.File("/proc/$pid/environ").readBytes(), Charsets.ISO_8859_1).split('\u0000').any { it.startsWith("WAYLAND_DISPLAY=") || it.startsWith("DISPLAY=") }
+    } catch (_: Exception) {
+        true
     }
 
     // The guest has no pid namespace: a guest pid IS the host pid, and these are our own UID's processes.
@@ -385,9 +542,15 @@ internal object CleanupRunner {
      * Stop what is due under AUTO rules. Each process is re-identified immediately before the signal (a recycled pid, or
      * PocketShell's own process, is refused), only SIGTERM is ever sent, and what happened is returned for the log.
      */
-    fun sweep(candidates: List<CleanupCandidate>, signaller: CleanupSignaller, ledger: CleanupLedger, nowMs: Long): List<CleanupLogEntry> {
+    fun sweep(
+        candidates: List<CleanupCandidate>,
+        signaller: CleanupSignaller,
+        ledger: CleanupLedger,
+        nowMs: Long,
+        limit: Int = Cleanup.MAX_PER_SWEEP,
+    ): List<CleanupLogEntry> {
         val out = ArrayList<CleanupLogEntry>()
-        for (c in Cleanup.dueForAuto(candidates)) {
+        for (c in Cleanup.dueForAuto(candidates, limit)) {
             val e = c.entry
             val refusal = ProcIdentityCheck.refusal(e.rec.startTicks, signaller.identity(e.pid))
             if (refusal != null) {
@@ -400,7 +563,14 @@ internal object CleanupRunner {
             if (c.rule == CleanupRule.HEAVY) {
                 val sockets = signaller.openSockets(e.pid)
                 if (sockets == null || sockets > 0) {
+                    ledger.recordRefusal(e)
                     out += CleanupLogEntry(nowMs, "Left ${e.label} alone - it has network connections open", false)
+                    continue
+                }
+                // An idle browser window is something the user left open on purpose. A rule naming the program overrides this.
+                if (signaller.isDesktopApp(e.pid)) {
+                    ledger.recordRefusal(e)
+                    out += CleanupLogEntry(nowMs, "Left ${e.label} alone - it is a desktop app. Add a rule for it to stop it when idle.", false)
                     continue
                 }
             }
@@ -459,6 +629,6 @@ internal object CleanupText {
 
     const val NEVER_TOUCHED =
         "Never touched by a rule: terminals and their shells, tmux/screen, anything that listens on a port, agents " +
-            "(Claude, Codex…), ssh/rsync/tar/git and other transfers, anything started from a terminal that is still open, " +
+            "(Claude, Codex…), the Linux desktop, apt and dpkg, ssh/rsync/tar/git and other transfers, anything started from a terminal that is still open, " +
             "and programs you mark KEEP. Auto only ever sends a polite stop (SIGTERM)."
 }

@@ -5,13 +5,13 @@
       "name": "Processes",
       "summary": "Everything running in the Linux guest — dev servers, background jobs like Gradle, terminal sessions, and what outlives the terminal",
       "author": "PocketShell",
-      "version": "2.2.0",
+      "version": "2.3.0",
       "minAppVersion": "0.13.0",
       "file": "widgets/servers.json",
       "plugin": {
         "className": "app.pocketshell.widget.servers.ServersPlugin",
-        "dex": "releases/servers/2.2.0/plugin.jar",
-        "sha256": "188ea35f952adf069ec3befe483fcfb84f1d35c99265bfa61b330960153fb2e0"
+        "dex": "releases/servers/2.3.0/plugin.jar",
+        "sha256": "58665b685f828caf61e43142962bdb48b223c10f6009dd6097a22b64f0e9343e"
       }
     },
     {

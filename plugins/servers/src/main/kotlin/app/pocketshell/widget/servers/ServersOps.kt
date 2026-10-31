@@ -28,6 +28,7 @@ internal object ServersOps {
     enum class Signal(val sigName: String, val confirmLabel: String, val past: String) {
         TERM("TERM", "STOP", "Stopped"),
         KILL("KILL", "FORCE KILL", "Killed"),
+        CONT("CONT", "RESUME", "Resumed"),
     }
 
     /** A signal awaiting (or having earned) its confirm. */
@@ -67,9 +68,16 @@ internal object ServersOps {
         title = when (req.signal) {
             Signal.TERM -> "Stop ${req.subject}?"
             Signal.KILL -> "Force-kill ${req.subject}?"
+            Signal.CONT -> "Resume ${req.subject}?"
         },
         body = buildString {
-            append(if (req.signal == Signal.TERM) "Stop " else "Force-kill ")
+            append(
+                when (req.signal) {
+                    Signal.TERM -> "Stop "
+                    Signal.KILL -> "Force-kill "
+                    Signal.CONT -> "Resume "
+                },
+            )
             append(req.processName ?: "this process")
             append(" (pid ${req.pid})")
             if (req.port != null) append(" listening on :${req.port}")
@@ -78,6 +86,7 @@ internal object ServersOps {
                 when (req.signal) {
                     Signal.TERM -> "SIGTERM, the graceful path."
                     Signal.KILL -> "SIGKILL cannot be caught: the process gets no chance to clean up or save."
+                    Signal.CONT -> "SIGCONT, it carries on from where it was frozen."
                 },
             )
             if (req.endsTerminal) append(" This is a terminal's shell — that terminal session ends.")

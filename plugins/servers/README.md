@@ -3,6 +3,35 @@
 > Renamed **Processes** in 2.2.0: it shows servers, background jobs like Gradle, terminal sessions and what outlives the terminal,
 > which "Servers" undersold. The id stays `servers` (Home layouts refer to it).
 
+## 2.3.0 - HEALTH, and a CLEAN UP you can shape
+
+**HEALTH tab** (a row on the Overview; the card shows a warning line). Design and tests: `ServersHealth.kt` / `ServersHealthTest.kt`.
+
+- **Process budget**: Android may SIGKILL the oldest process once all apps together pass 32, and the oldest is usually the
+  desktop's engine. The page shows this app's count against that limit. Other apps' processes cannot be seen from here.
+- **Apps, not processes**: a browser and its helpers are one row, with their total processes, memory and CPU. A shell or
+  session keeper starts a new app, and the desktop's Weston and Xwayland are one row, "Linux desktop".
+- **What it looks for**: too many processes in one app, helpers crashing or restarting repeatedly, sustained high CPU,
+  memory over a limit, fast memory growth, a process frozen for minutes (a terminal waiting on one looks hung), and dead
+  processes not collected. A gap in our looking is unknown, never evidence. Thresholds are yours; any program can be ignored.
+- **Lower priority** is the gentle action: nothing stops, and every thread gets nice 10 with no guest exec. Restore undoes
+  it. It can be automatic for high CPU, off by default, and never applies to the desktop.
+- **Cost**: one look a minute, every 15 s only while something is wrong. It reads the same /proc files as the scans.
+  It runs once the card has been shown in this app session, and can be turned off.
+
+**CLEAN UP**, more customisation. Everything new that acts starts OFF.
+
+- **Your rules**: name a program and choose Off / Ask / Auto, how long idle and how much memory. Every guard still applies
+  (keep, ports, terminals, protected programs), and ADD RULE on an app row fills in the name.
+- **Process budget guard**: at a count you choose, Auto stops one idle program at a time, ahead of its rule's window. It only
+  takes what the rules could stop anyway, idle for at least 5 minutes.
+- **How Auto behaves**: at most 1, 3 or 5 stops per check, and optionally only when free memory is low.
+- **Stop all ready**, a type-in keep list, wider idle and memory choices, and memory freed this session.
+
+**Safety fixes**: the protected list still named Alpine's `apk`; it now covers `apt`, `apt-get`, `dpkg` and the desktop. The
+heavy rule could have stopped a browser left open on the desktop; it now refuses desktop apps unless a rule names them. A
+sweep-time refusal is remembered, so it no longer logs again every minute.
+
 ## 2.2.0 - CLEAN UP, and an audit of what every page shows
 
 **CLEAN UP tab** (also a one-line nudge on the card and a row on the Overview). Two rules, both **OFF** until you turn them on, each
@@ -127,12 +156,12 @@ The exec goes through `GuestLaunch`, which resolves the host's
 ## Publish
 
 ```bash
-tools/build-plugin.sh servers 2.1.0 --update-catalog
+tools/build-plugin.sh servers 2.3.0 --update-catalog
 ```
 
 ## Files
 
-- `ServersPlugin.kt` — the WidgetPlugin entry (id `servers`, 2.1.0)
+- `ServersPlugin.kt` — the WidgetPlugin entry (id `servers`, 2.3.0)
 - `ServersApp.kt` — the application object, process-scoped state, the
   lifecycle-aware tick, the HTTP fan-out, the signal pipeline and the exec seam
 - `ServersCard.kt` — the MINI mode: row model (`CardRows`), overview, details
@@ -141,6 +170,7 @@ tools/build-plugin.sh servers 2.1.0 --update-catalog
 - `ServersScreens.kt` — routing, the SERVERS tab's dashboard + server detail
 - `ServersComponents.kt` — shared controls (rule, stat strip, kind dot, search, dialogs)
 - `ServersProcesses.kt` — pure /proc parsing, classifier, survival, grouping, the scanner
+- `ServersHealth.kt` — budget, app grouping, findings, priority (pure); `ServersHealthScreen.kt` — the HEALTH page
 - `ServersProbe.kt` — the host-probe wrapper (pid-set gate) + system-strip parsers
 - `HttpCheck.kt` — the app-side HTTP check + the session beat ring
 - `ServersPresentation.kt` — filter, sort, formatting (pure, JVM-tested)

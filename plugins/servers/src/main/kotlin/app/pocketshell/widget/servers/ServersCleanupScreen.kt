@@ -12,6 +12,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -42,7 +46,11 @@ internal fun CleanupBody(state: ServersState, actions: ServersActions) {
             modifier = Modifier.padding(top = 6.dp),
         )
 
-        for (rule in CleanupRule.entries) RuleBlock(rule, settings.rule(rule)) { next -> state.updateCleanup { it.with(rule, next) } }
+        for (rule in listOf(CleanupRule.BUILDS, CleanupRule.HEAVY)) RuleBlock(rule, settings.rule(rule)) { next -> state.updateCleanup { it.with(rule, next) } }
+
+        CustomRulesBlock(state)
+        BudgetGuardBlock(state)
+        LimitsBlock(state)
 
         SectionLabel("IDLE NOW", Modifier.padding(top = 18.dp, bottom = 4.dp))
         Rule()
@@ -54,11 +62,16 @@ internal fun CleanupBody(state: ServersState, actions: ServersActions) {
                 modifier = Modifier.padding(vertical = 10.dp),
             )
         }
+        val ready = candidates.filter { it.due }
+        if (ready.size > 1) {
+            ActionButton("STOP ALL ${ready.size} READY · ${ServersPresentation.formatBytes(ready.sumOf { it.footprintBytes })}") { state.cleanNowPending = true }
+        }
         candidates.forEach { c -> CandidateRow(c, onStop = { actions.onSignalProcess(c.entry, Signal.TERM) }, onKeep = { state.keep(c.entry) }) }
 
+        SectionLabel("KEEP RUNNING", Modifier.padding(top = 18.dp, bottom = 4.dp))
+        Rule()
+        NameEntry("ADD A PROGRAM TO KEEP") { name -> state.updateCleanup { s -> if (CleanupSettingsCodec.validKeep(name) && s.keep.size < CleanupSettingsCodec.MAX_KEEP) s.copy(keep = s.keep + name) else s } }
         if (settings.keep.isNotEmpty()) {
-            SectionLabel("KEEP RUNNING", Modifier.padding(top = 18.dp, bottom = 4.dp))
-            Rule()
             settings.keep.sorted().forEach { name ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     MonoText(text = name, modifier = Modifier.weight(1f))
@@ -67,6 +80,9 @@ internal fun CleanupBody(state: ServersState, actions: ServersActions) {
             }
         }
 
+        if (state.freedBytes > 0) {
+            MonoText(text = "FREED THIS SESSION · ${ServersPresentation.formatBytes(state.freedBytes)}", color = HomeTokens.accent, fontSize = 11, modifier = Modifier.padding(top = 18.dp))
+        }
         if (state.cleanupLog.isNotEmpty()) {
             SectionLabel("RECENT", Modifier.padding(top = 18.dp, bottom = 4.dp))
             Rule()
@@ -90,6 +106,77 @@ internal fun CleanupBody(state: ServersState, actions: ServersActions) {
     }
 }
 
+/** A name field that adds on ADD and clears itself. */
+@Composable
+internal fun NameEntry(placeholder: String, onAdd: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) { SearchField(value = text, onChange = { text = it }, placeholder = placeholder) }
+        ActionButton("ADD") {
+            val name = text.trim().lowercase()
+            if (name.isNotEmpty()) onAdd(name)
+            text = ""
+        }
+    }
+}
+
+/** Rules for programs the user names: Android Studio's daemon, a test runner, a browser left open overnight. */
+@Composable
+private fun CustomRulesBlock(state: ServersState) {
+    val custom = state.cleanup.custom
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+        SectionLabel("YOUR RULES")
+        Rule(Modifier.padding(top = 4.dp))
+        MonoText(
+            text = "Name a program, as it appears in these lists, and choose when it may be stopped. The safety guards still apply.",
+            color = HomeTokens.textDim,
+            maxLines = 3,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        NameEntry("PROGRAM NAME, E.G. FIREFOX-ESR") { name -> state.updateCleanup { it.addCustom(name) } }
+        custom.forEach { rule ->
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                MonoText(text = rule.name, modifier = Modifier.weight(1f))
+                ActionButton("REMOVE") { state.updateCleanup { s -> s.copy(custom = s.custom - rule) } }
+            }
+            RuleChoices(CleanupRule.CUSTOM, rule.settings) { next -> state.updateCleanup { it.withCustom(rule.name, next) } }
+        }
+    }
+}
+
+/** Stops the count reaching the point where Android starts killing, which is what ends the desktop. */
+@Composable
+private fun BudgetGuardBlock(state: ServersState) {
+    val s = state.cleanup
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+        SectionLabel("PROCESS BUDGET GUARD")
+        Rule(Modifier.padding(top = 4.dp))
+        MonoText(
+            text = "Android may end the desktop above ${ProcessBudgetFacts.LIMIT} processes. Auto stops one idle program at a time at this count, sooner than its rule would. Only what the rules above could stop anyway.",
+            color = HomeTokens.textDim,
+            maxLines = 5,
+            modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
+        )
+        ChoiceRow("WHEN REACHED", listOf(CleanupMode.OFF, CleanupMode.AUTO).map { it.label to it }, s.budgetMode) { m -> state.updateCleanup { it.copy(budgetMode = m) } }
+        ChoiceRow("AT PROCESSES", CleanupSettingsCodec.BUDGET_AT_CHOICES.map { "$it" to it }, s.budgetAt) { n -> state.updateCleanup { it.copy(budgetAt = n) } }
+    }
+}
+
+@Composable
+private fun LimitsBlock(state: ServersState) {
+    val s = state.cleanup
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+        SectionLabel("HOW AUTO BEHAVES")
+        Rule(Modifier.padding(top = 4.dp))
+        ChoiceRow("AT MOST", CleanupSettingsCodec.PER_SWEEP_CHOICES.map { "$it / check" to it }, s.perSweep) { n -> state.updateCleanup { it.copy(perSweep = n) } }
+        ChoiceRow(
+            "ONLY WHEN FREE",
+            CleanupSettingsCodec.LOW_MEMORY_CHOICES.map { (if (it == 0) "always" else "under $it %") to it },
+            s.lowMemoryPercent,
+        ) { n -> state.updateCleanup { it.copy(lowMemoryPercent = n) } }
+    }
+}
+
 @Composable
 private fun RuleBlock(rule: CleanupRule, s: RuleSettings, onChange: (RuleSettings) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
@@ -98,6 +185,13 @@ private fun RuleBlock(rule: CleanupRule, s: RuleSettings, onChange: (RuleSetting
         }
         Rule(Modifier.padding(top = 4.dp))
         MonoText(text = rule.blurb, color = HomeTokens.textDim, maxLines = 3, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+        RuleChoices(rule, s, onChange)
+    }
+}
+
+@Composable
+private fun RuleChoices(rule: CleanupRule, s: RuleSettings, onChange: (RuleSettings) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
         ChoiceRow("WHEN IDLE", CleanupMode.entries.map { it.label to it }, s.mode) { onChange(s.copy(mode = it)) }
         ChoiceRow("IDLE FOR", CleanupSettingsCodec.idleChoices(rule).map { minutesLabel(it) to it }, s.idleMinutes) { onChange(s.copy(idleMinutes = it)) }
         ChoiceRow("USING AT LEAST", CleanupSettingsCodec.memChoices(rule).map { memLabel(it) to it }, s.minMemoryMb) { onChange(s.copy(minMemoryMb = it)) }
@@ -109,7 +203,7 @@ private fun memLabel(mb: Int) = when { mb == 0 -> "any"; mb >= 1000 -> "${mb / 1
 
 /** A labelled row of text choices; the chosen one is accent with a rule under it. No chips, no boxes. */
 @Composable
-private fun <T> ChoiceRow(label: String, options: List<Pair<String, T>>, selected: T, onSelect: (T) -> Unit) {
+internal fun <T> ChoiceRow(label: String, options: List<Pair<String, T>>, selected: T, onSelect: (T) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         MonoText(text = label, color = HomeTokens.textDim, fontSize = 9, modifier = Modifier.width(96.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState())) {

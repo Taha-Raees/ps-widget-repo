@@ -580,9 +580,9 @@ class CleanupContractTest {
     }
 
     @Test
-    fun `the monitor exists only while a rule is on, honours pause, and refreshes the listeners before it stops anything`() {
+    fun `the monitor exists only while it has work, honours pause, and refreshes the listeners before it stops anything`() {
         val a = code("ServersApp.kt")
-        assertTrue(a.contains("if (cleanup.watching)"))
+        assertTrue(a.contains("if (cleanup.monitorNeeded)"))
         assertTrue("pause stops the monitor from acting", a.contains("if (paused) continue"))
         val loop = a.substringAfter("private suspend fun monitorLoop()")
         assertTrue("a full scan precedes any stop", loop.indexOf("scan()") in 0 until loop.indexOf("CleanupRunner.sweep("))

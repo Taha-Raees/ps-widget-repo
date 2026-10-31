@@ -70,6 +70,8 @@ internal data class ProcRecord(
     val hupIgnored: Boolean,
     /** stat's starttime — with the pid, the process's IDENTITY (a reused pid has a new one). */
     val startTicks: Long = 0,
+    /** The main thread's nice value: above 0 means it runs at a lowered priority. */
+    val nice: Int = 0,
 ) {
     val hasTty: Boolean get() = tty != 0
 
@@ -106,13 +108,14 @@ internal object ProcRecordParsing {
         val cpuTicks: Long,
         val startTicks: Long,
         val rssBytes: Long,
+        val nice: Int = 0,
     )
 
     /**
      * comm is parenthesised and may hold spaces/parens, so split on the
      * FIRST '(' and LAST ')'. Tail field N maps to tail[N-3]: state=3→0,
      * ppid=4→1, pgrp=5→2, session=6→3, tty_nr=7→4, tpgid=8→5, utime=14→11,
-     * stime=15→12, num_threads=20→17, starttime=22→19, rss=24→21.
+     * stime=15→12, nice=19→16, num_threads=20→17, starttime=22→19, rss=24→21.
      */
     fun parseStat(text: String): Stat? {
         val open = text.indexOf('(')
@@ -132,6 +135,7 @@ internal object ProcRecordParsing {
             cpuTicks = (tail[11].toLongOrNull() ?: return null) + (tail[12].toLongOrNull() ?: return null),
             startTicks = tail[19].toLongOrNull() ?: return null,
             rssBytes = (tail[21].toLongOrNull() ?: return null) * ProcParsing.PAGE_BYTES,
+            nice = tail[16].toIntOrNull() ?: 0,
         )
     }
 
@@ -265,6 +269,12 @@ internal object ProcClassifier {
             return Identity(ProcKind.OTHER, if (target != null) "java $target" else "java")
         }
         return Identity(ProcKind.OTHER, prog)
+    }
+
+    /** The Android app's own process (and its service processes): forked by Android, so never counted against the limit. */
+    fun isAppProcess(argv: String?, comm: String): Boolean {
+        val first = argv?.split(' ')?.firstOrNull { it.isNotEmpty() } ?: comm
+        return baseName(first).startsWith("app.pocketshell") || comm.startsWith("app.pocketshell")
     }
 
     /** True for the app's own process and its tracer helpers — never guest processes. */
@@ -493,6 +503,8 @@ internal data class ProcSnapshot(
     val cpu: Map<Int, Float?>,
     val pidSet: Set<Int>,
     val atMs: Long,
+    /** What Android counts against its limit: every own-UID process but the app's own, engine processes included. */
+    val forkedCount: Int = records.size,
 )
 
 /**
@@ -530,6 +542,7 @@ internal class ProcessScanner(
         val records = ArrayList<ProcRecord>()
         val cpu = HashMap<Int, Float?>()
         val liveKeys = HashSet<String>()
+        var appProcesses = 0
 
         // Over the cap, keep the NEWEST pids — they are what the user just started.
         for (pid in pids.takeLast(maxPids)) {
@@ -544,6 +557,7 @@ internal class ProcessScanner(
             } catch (_: Exception) {
                 null
             }
+            if (ProcClassifier.isAppProcess(argv, stat.comm)) appProcesses++
             if (ProcClassifier.isInfrastructure(argv, stat.comm)) continue
             val key = "$pid:${stat.startTicks}"
             liveKeys += key
@@ -578,6 +592,7 @@ internal class ProcessScanner(
                 cwd = readCwd(pid),
                 hupIgnored = status.hupIgnored,
                 startTicks = stat.startTicks,
+                nice = stat.nice,
             )
 
             val sample = ProcessSample(pid, stat.cpuTicks, stat.rssBytes, nowMs)
@@ -588,7 +603,7 @@ internal class ProcessScanner(
         // Forget processes that are gone — the memory must not grow with churn.
         prevSamples.keys.retainAll(liveKeys)
 
-        return ProcSnapshot(records = records, cpu = cpu, pidSet = pids.toSet(), atMs = nowMs)
+        return ProcSnapshot(records = records, cpu = cpu, pidSet = pids.toSet(), atMs = nowMs, forkedCount = (pids.size - appProcesses).coerceAtLeast(0))
     }
 
     private fun readCwd(pid: Int): String? = try {
